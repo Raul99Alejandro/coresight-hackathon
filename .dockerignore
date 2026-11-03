@@ -1,0 +1,20 @@
+# Whitelist: only what the image needs. data/raw/kaggle_mining_core (NC) never enters.
+*
+!pyproject.toml
+!README.md
+!src/
+!data/labels/ONK-DTPH5.1_box05.json
+!data/labels/ONK-DTPH5.1_box06.json
+!data/labels/pieces/ONK-DTPH5.1_box05.json
+!data/labels/pieces/ONK-DTPH5.1_box06.json
+!data/labels/U12G-GF-GT2_box01.json
+!data/labels/pieces/U12G-GF-GT2_box01.json
+!data/labels/U12G-GF-GT2_box03.json
+!data/labels/pieces/U12G-GF-GT2_box03.json
+!data/raw/commons_onkalo_1.jpg
+!data/raw/commons_nts_u12g_1.jpg
+!data/raw/commons_nts_u12g_2.jpg
+!data/prices_example.json
+!data/demo/not_a_core_box.jpg
+**/__pycache__
+**/*.egg-info

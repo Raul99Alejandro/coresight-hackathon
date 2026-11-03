@@ -1,0 +1,2573 @@
+diff --git a/.claude/commands/day.md b/.claude/commands/day.md
+index 9e74fcf..11dedc7 100644
+--- a/.claude/commands/day.md
++++ b/.claude/commands/day.md
+@@ -4,4 +4,4 @@ description: Qué toca hoy en el plan del hackathon y las 3 primeras tareas
+ 
+-1. Lee `docs/PLAN.md` y `CLAUDE.md`.
+-2. Calcula la fecha de hoy en America/Mexico_City (por ejemplo `python -c "from datetime import datetime; from zoneinfo import ZoneInfo; print(datetime.now(ZoneInfo('America/Mexico_City')))"`; en Windows puede requerir `pip install tzdata`) y di qué día del plan es (0 a 10), su objetivo y su criterio "listo cuando". Di cuántas horas faltan para la entrega (mié 4 nov 2026, 20:00 hora de Zacatecas).
++1. Lee `internal/PLAN.md` y `CLAUDE.md`.
++2. Calcula la fecha de hoy en America/Mexico_City (por ejemplo `python -c "from datetime import datetime; from zoneinfo import ZoneInfo; print(datetime.now(ZoneInfo('America/Mexico_City')))"`; en Windows puede requerir `pip install tzdata`) y di qué día del plan es (0 a 11; el plan puede ir adelantado respecto a la fecha), su objetivo y su criterio "listo cuando". Di cuántas horas faltan para la entrega (mié 4 nov 2026, 20:00 hora de Zacatecas).
+ 3. Revisa `git log --oneline -15` y `git status`.
+diff --git a/.gitignore b/.gitignore
+index 9db7a79..71509b2 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -9,4 +9,12 @@ data/raw/
+ data/cache/
+-outputs/
++data/reviews/
++# outputs/ stays private except the public metrics (no Kaggle photos or reference values)
++outputs/*
++!outputs/eval/
++!outputs/describe/
++outputs/eval/private/
+ .claude/settings.local.json
+ CLAUDE.local.md
++
++# Internal notes: plan, analyses, video script
++internal/
+diff --git a/CLAUDE.md b/CLAUDE.md
+index e2a16f6..fa1aec9 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -9,3 +9,3 @@ Proyecto de AnaliZac para el Meta Global AI Developer Hackathon.
+ - Juzgado: 4 al 8 nov. Final en vivo y ganadores: lun 9 nov.
+-- Plan día por día: `docs/PLAN.md`. Lo prometido en la aplicación: `docs/APPLICATION.md`.
++- Plan día por día: `internal/PLAN.md` (fuera de git). Lo prometido en la aplicación: `docs/APPLICATION.md`.
+ - Comando `/day`: dice qué toca hoy y propone tareas.
+@@ -14,5 +14,2 @@ Entrada: foto de una caja. Salida: registro geotécnico y geológico por interva
+ 
+-## Restricción
+-Nada relacionado con Freight Technologies: ni código, ni datos, ni el dominio de logística o aduanas.
+-
+ ## Arquitectura (neurosimbólica)
+@@ -25,6 +22,7 @@ Nada relacionado con Freight Technologies: ni código, ni datos, ni el dominio d
+ | 4 | describe: litología, alteración, mineralización, anomalías | `pipeline.describe` + `meta_client` | Muse Spark, salida validada con Pydantic |
+-| 5 | handoffs: borrador de solicitud de ensayes y alerta de terreno | `pipeline.draft_handoffs` | Agente, solo con aprobación humana |
+-| 6 | api + UI de revisión, correcciones guardadas, export CSV | por crear (día 7) | FastAPI |
++| 5 | api + UI de revisión, correcciones escritas o dictadas, export CSV | por crear (día 7) | FastAPI, Muse Voice Transcribe |
++| 6 | agentes de área: orquestador y borradores para laboratorio, seguridad/geotecnia, planta y finanzas | `pipeline.draft_handoffs` (día 8) | Muse Wonder orquesta, Muse Spark con herramientas; solo con aprobación humana |
+ 
+-Visión a futuro (no es compromiso del hackathon): capa de agentes que conecte operaciones, laboratorio, seguridad, administración y finanzas de una mina.
++La etapa 4 también corre con Muse Glimmer en infraestructura propia (modo sin internet), con el mismo contrato de salida.
++Visión a futuro (no es compromiso del hackathon): sumar mantenimiento, operaciones y administración a la misma capa de agentes.
+ 
+diff --git a/data/labels/README.md b/data/labels/README.md
+index 3e4df46..7e8660f 100644
+--- a/data/labels/README.md
++++ b/data/labels/README.md
+@@ -26,3 +26,40 @@ The format is validated by `coresight.schemas.BoxLabel`.
+ | `runs[].tcr_pct` | Recovered core / run length x 100 |
+-| `runs[].natural_fractures` | Natural fractures in the run (mechanical breaks excluded) |
++| `runs[].natural_fractures` | Natural fractures in the run (mechanical breaks excluded); `null` when the source did not log them |
++
++## Labels transcribed from box lids
++
++The Kaggle photos (`data/raw/kaggle_mining_core/`) have the mine geologist's log painted on the box lid:
++run, from, to, length, CR% (= TCR) and RQD%. Those values were measured on the physical core, so they
++are the best ground truth available. Labels made from them:
++
++- take `hole_id` and `box_number` from the lid (`BH NO` / `HOLE ID` and `BOX NO`);
++- copy every run listed on the lid, including runs that continue in the previous or next box;
++  the photo then shows only part of that run, so compare RQD per run, not per box;
++- set `natural_fractures` to `null` (the lid does not log fractures).
++
++Transcription choices to review: `I3075_box01` run 5 RQD written like a "c", read as 0;
++`I3250_box03` run 9 RQD read as 20; `I3150_box10` run 32 RQD read as 70.
++`I3400` box 2 was skipped because its CR and RQD cells for runs 7 and 8 are overwritten.
++
++## Labels measured on the photo (piece sheets)
++
++When the photo has no logged RQD (the Onkalo boxes), the pieces are measured on the photo in
++`pieces/<hole_id>_box<NN>.json` (format in `coresight.labeling`): the core pieces of every row in
++pixels, the break after each piece (`natural`, `mechanical`, `uncertain` or `run_end` at a run
++block) and the metre marks painted on the core, which give the scale. Then
++
++    .venv\Scripts\python scripts\label_from_pieces.py
++
++writes the label with RQD, TCR and fractures computed by `geometry.log_interval`, and an overlay
++in `outputs/labels/` to review the measurements against the photo. A test checks that every label
++still matches its sheet.
++
++Onkalo choices to review: breaks without a clear coating, and the breaks at row ends, are
++`uncertain` (counted as natural, the conservative choice); the crushed end of the first row of
++box 5 is three 1.5 cm fragments; the chip lying on top of that row is not counted.
++`commons_onkalo_2.jpg` shows the same two boxes wet, so it has no label of its own.
++
++Nevada U12G box 3 choices to review: the run 4 rubble at the end of row 1 is five fragments under
++10 cm; breaks next to the wax-sealed samples are `uncertain`; the "Waxed Sandia" block is a sample
++taken out and counts as core. Details in `SOURCES.md`.
+ 
+diff --git a/data/labels/SOURCES.md b/data/labels/SOURCES.md
+index 97932b5..95fef79 100644
+--- a/data/labels/SOURCES.md
++++ b/data/labels/SOURCES.md
+@@ -19,2 +19,5 @@ Licenses were checked on the source page on 2026-10-25.
+ Rejected or pending:
++- geoloogia.info (source 4), checked again on 2026-10-28 for the hole view: the file page of
++  [Aseri PH012B](https://geoloogia.info/en/file/154417/) has no license field; the portal only says
++  its materials are "mostly" CC BY-SA "unless indicated otherwise". Not clear per file, so not used.
+ - [NTGS GEMIS HyLogged Drillholes](https://geoscience.nt.gov.au/gemis/ntgsjspui/handle/1/92544?mode=full): tray photography via STRIKE, but the page states only "© Northern Territory Government", no open license. Do not use until a license is confirmed.
+@@ -37,2 +40,28 @@ or from photos taken with permission at a mine.
+ 
++## Finding (2026-10-27): broken core, no sulfides
++
++Day 8 search for a "dramatic" demo box (poor rock and visible sulfides): about 50 Commons candidates
++checked by eye (Drill cores, Core samples by country, Core repositories; searches in English, German,
++French and Spanish). Full boxes of broken core exist (Breiðdalsvík, Nevada Test Site U12G, the
++latter with drilled and recovered length written on each run label), but no openly licensed full box
++shows sulfides. Sulfides in a full box need a photo taken with permission at a mine.
++
++Chosen as the poor-rock demo sample: `commons_nts_u12g_1.jpg` (hole U12G-GF-GT#2, box 1, 0.0 to
++11.2 ft, 4 rows). Piece sheet `pieces/U12G-GF-GT2_box01.json` measured by hand on the straightened
++tray. Scale from the depths written on the wax-sealed samples (9.7-10.1 ft and 10.7-11.2 ft): 37.9
++px/cm, a 66 cm tray. Run 3 (10.1-15.1 ft) continues in the next box and is logged to the box end.
++The measured recovery matches the run labels: run 1 48.5% (label 2.4 of 5.0 ft), run 2 75.7% (4.0 of
++5.1 ft), run 3 97.4% (1.1 of 1.1 ft). Depths are converted from feet to metres.
++
++## Finding (2026-10-28): a second box of the same Nevada hole
++
++`commons_nts_u12g_2.jpg` is the same hole as the demo sample: the cards read U12G-GF-GT#2, 19.0 at the
++start and 26.3 at the end, run 5 (20.1-25.1 ft, drilled 5.0, recovered 4.9) and run 6 (25.1-30.2 ft)
++blocks, and wax-sealed samples at 23.2-23.6 and 23.6-24.0 ft. Labelled as box 3 in
++`pieces/U12G-GF-GT2_box03.json`: the number is not written on the box; the box before it (11.2 to
++19.0 ft) is not public, so the hole view shows that stretch as a gap. Scale from the wax-sealed
++samples and the run 6 block: 34.4 px/cm, a 68 cm tray. Run 5 recovered 98.2% (the card says 4.9 of
++5.0 ft, 98%). The "Waxed Sandia 25.9-26.1" block stands in for a sample taken out and is counted as
++recovered core. Depths are converted from feet to metres.
++
+ ## Images used
+@@ -52 +81,33 @@ Downloaded with `scripts/fetch_public_images.py` (`data/raw/` is not in git).
+ | `commons_potter_argillite_2.jpg` | [Commons](https://commons.wikimedia.org/wiki/File:Sulfidic_argillite_%26_polymetallic_massive_sulfide_(Middle_Tholeiitic_Unit,_Kidd-Munro_Assemblage,_Neoarchean,_2.711_to_2.719_Ga;_drill_cores_at_the_Potter_Mine,_east_of_Timmins,_Ontario,_Canada)_2_(46959105055).jpg) | James St. John | CC BY 2.0 | none |
++| `commons_breidalsvik.jpg` | [Commons](https://commons.wikimedia.org/wiki/File:Drill_Cores,_in_Drill_Core_Library_in_Brei%C3%B0dalsv%C3%ADk.jpg) | Quant8 | CC BY-SA 4.0 | none |
++| `commons_nts_u12g_1.jpg` | [Commons](https://commons.wikimedia.org/wiki/File:CORE_SAMPLES,_NEVADA_TEST_SITE_-_DPLA_-_db76f1349ca15c6259411296fd16eef3.jpg) | U.S. Department of Energy, NNSA (Nevada Test Site) | Public domain | none |
++| `commons_nts_u12g_2.jpg` | [Commons](https://commons.wikimedia.org/wiki/File:CORE_SAMPLES,_NEVADA_TEST_SITE_-_DPLA_-_5eb8f78b3e71b2e05f1806559ea3b012.jpg) | U.S. Department of Energy, NNSA (Nevada Test Site) | Public domain | none |
++| `commons_nts_1981.jpg` | [Commons](https://commons.wikimedia.org/wiki/File:CORE_SAMPLES,_NEVADA_TEST_SITE_-_DPLA_-_344a80c6542b9421f65b34db561bdfcf.jpg) | U.S. Department of Energy, NNSA (Nevada Test Site) | Public domain | none |
++| `commons_diamond_core.jpg` | [Commons](https://commons.wikimedia.org/wiki/File:Diamond_Core.jpeg) | Blastcube | CC BY-SA 3.0 | none |
++| `commons_butte_broken_1.jpg` | [Commons](https://commons.wikimedia.org/wiki/File:Broken_drill_core_(Butte_Mining_District,_Montana,_USA)_1.jpg) | James St. John | CC BY 2.0 | none |
++| `commons_selfie_tramping.jpg` (not kept; only to test the input gate) | [Commons](https://commons.wikimedia.org/wiki/File:Tom_selfie_tramping.jpg) | Tdbnz | CC0 | 1280 px thumbnail |
++
++The labels `ONK-DTPH5.1_box05` and `ONK-DTPH5.1_box06` (and their piece sheets) are measured on
++`commons_onkalo_1.jpg` (CC BY-SA 4.0, Kallerna). They are free to use in the demo; overlays drawn
++on the photo carry the same license and attribution.
++
++### Kaggle Mining Core Sampling Dataset (evaluation only)
++
++| Files | Source URL | Author | License | Changes |
++|---|---|---|---|---|
++| `kaggle_mining_core/train/*.jpg` (156 photos), `kaggle_mining_core/test/*.jpg` (48 photos), `train.csv`, `test.csv` | [Kaggle, version 1](https://www.kaggle.com/datasets/imoore/mining-core-sampling-dataset/versions/1) | Eisa (imoore); photos from Sirjan Copper Co., Takht-e-Gonbad mine | CC BY-NC-SA 4.0 | none |
++
++Downloaded by hand on 2026-10-26 (Kaggle login required). Version 2 of the dataset is empty (22 B zip):
++use version 1. Extract to `data/raw/kaggle_mining_core/`.
++
++The labels `I3000_*`, `I3075_*`, `I3150_*`, `I3250_*` and `I3400_*` in this folder are transcribed from
++the box lids in these photos, so they are a derived work under CC BY-NC-SA 4.0 with the attribution above.
++Use them and the photos only for evaluation (day 9), never in the deployed demo, the video or anything paid.
++
++## Test images (`tests/data/`)
++
++| File | Source | License | Changes |
++|---|---|---|---|
++| `screenshot_glyphs.jpg` | Our own screenshot of the CoreSight visual guide (`outputs/models_glyphs.png`), the one a judge could upload | Ours | Resized to 1000 px wide |
++| `data/demo/not_a_core_box.jpg` | The same screenshot, served by the 60-second tour (`POST /api/tour/not-a-box`) so the gate refuses it live | Ours | Copy of `tests/data/screenshot_glyphs.jpg` |
++| `potter_closeup.jpg` | `commons_potter_27.jpg` above (James St. John) | CC BY 2.0 | Resized to 1000 px wide |
+diff --git a/docs/APPLICATION.md b/docs/APPLICATION.md
+index b227084..f5b1ed3 100644
+--- a/docs/APPLICATION.md
++++ b/docs/APPLICATION.md
+@@ -13,3 +13,3 @@ La entrega final tiene que mostrar cada punto. Si algo se recorta, que sea consc
+ | 4 | Muse Spark describe litología, alteración y mineralización con vocabulario estándar y marca anomalías (baja recuperación, fracturamiento intenso, sulfuros visibles) con explicación | `pipeline.describe`, `meta_client.describe_interval`, `schemas.GeologyDescription` | 6 |
+-| 5 | UI de revisión: el geólogo corrige intervalos, las correcciones se guardan para evaluación y futuro fine-tuning, export a CSV | FastAPI (día 7) | 7 |
++| 5 | UI de revisión: el geólogo corrige intervalos, las correcciones se guardan para evaluación y futuro fine-tuning, export a CSV | `coresight.api`, `coresight.review`, `src/coresight/web/index.html` | 7 |
+ | 6 | Handoffs con aprobación humana: borrador de solicitud de ensayes para el laboratorio y alerta de condición de terreno para seguridad cuando la roca es mala | `pipeline.draft_handoffs` | 8 |
+@@ -25,5 +25,67 @@ La aplicación dice que Muse Code acelera el build. Hay que usarlo de verdad y d
+ Registro de uso:
+-- (vacío)
++- 27 oct, día 8: Muse Code 1.4.13 escribió `src/coresight/verify.py` (el verificador determinista de los borradores de los agentes de área).
++  - La especificación son los 20 tests de `tests/test_verify.py`, escritos antes por nosotros. La implementación es de Muse Code y no la editamos.
++  - Ronda 1, sesión `bbc6432a-3cb8-407d-8572-921d33527e31`: el verificador completo contra 15 tests. 28 llamadas al modelo.
++  - Ronda 2, sesión `88fc39bc-b75a-47b0-8d5f-466e68048e0a`: arreglo de ruff y 5 tests nuevos (presupuesto restante, historial del pozo, runs desde uno). 15 llamadas.
++  - Comando: `muse exec --contributor-mode off --disable-approval --json`, con sandbox.
++  - La sandbox de Windows de Muse no pudo arrancar PowerShell, así que corrimos pytest y ruff fuera de ella y le regresamos el resultado.
++  - Trazas: `docs/muse-code/verify-1.json` y `verify-2.json`. Commit: `0b594f1`.
++  - El campo `"model": "muse-spark-1.3-contributor"` de esas dos trazas es el id de modelo que Muse Code usa por omisión en esta cuenta, no el modo contributor (que iba apagado). Lo confirmamos con `muse model-profile show` y dos corridas de prueba. Desde el día 10 todas las corridas llevan `--model muse-spark-1.3`.
++- 27 oct, día 10 (punto A del segundo análisis): dos corridas más, mismo método, con `--model muse-spark-1.3`.
++  - `src/coresight/gate.py`, la compuerta de entrada: rechaza una foto que no es caja con la confianza de calibración, la de SAM y el `is_core_tray` de Muse Spark. Especificación: 16 tests de `tests/test_gate.py`, escritos antes por nosotros. Sesión `01a17f99-8f2a-7be0-9d5a-d4e1efe7b717`, 14 llamadas. Traza: `docs/muse-code/gate-1.json`. Commit: `413093d`.
++  - `src/coresight/verify.py`, ronda 3: tramos desde 1 y detalles en palabras, sin nombres de campo. Sesión `01a17f99-9b2b-7bd3-91e8-c08bf9dd5502`, 22 llamadas. Traza: `docs/muse-code/verify-3.json`. Commit: `1d1681b`.
++  - La sandbox sigue sin arrancar PowerShell; corrimos pytest y ruff fuera. No editamos su código.
++- 28 oct (puntos B y C del segundo análisis): Muse Code 1.4.14, mismo método, `--model muse-spark-1.3`.
++  - `sam_prompt` y `grid_box_to_pixels` en `src/coresight/meta_client.py`: el constructor de prompts de caja y punto de SAM 3.1 y el paso de la cuadrícula 0 a 1000 de Spark a pixeles. Especificación: 22 tests de `tests/test_sam_prompts.py`, escritos antes por nosotros (commit `76b9cf1`). Sesión `01a17fc6-f402-7be3-981a-3577dbf7c4c5`, 17 llamadas. Traza: `docs/muse-code/sam-prompts-1.json`. Commit: `84b06fe`.
++  - La sandbox sigue sin PowerShell: Muse Code revisó los tests a mano y nosotros los corrimos (39 en verde, ruff limpio). Su herramienta de edición no encontraba el texto en el archivo con CRLF y lo reescribió con LF; git lo normaliza y solo cambiaron las dos funciones y tres ayudantes.
++- 28 oct (punto D del segundo análisis): la agregación del barreno por profundidad, `pieces_at_depth` y `log_hole` en `src/coresight/geometry.py`. Muse Code 1.4.14, `--model muse-spark-1.3`. Primera pieza con constructor y revisor, como recomendó Agents 102.
++  - Especificación: `tests/test_hole.py`, escrita antes por nosotros (commit `c780b8d`, 29 tests).
++  - Constructor, ronda 1: sesión `01a183d3-a60a-74c3-b5ab-dd720838a11d`, 15 llamadas. Traza: `docs/muse-code/hole-1.json`. Commit: `895b4ba`.
++  - Revisor de solo lectura (`--disable-write`, sandbox encendida): sesión `01a183db-f694-7060-b8de-67eb8f826b4e`, 5 llamadas. Traza: `docs/muse-code/hole-review-1.json`. Encontró errores reales que los tests no veían: una rotura natural justo en el límite de un intervalo de 1 m se perdía, una caja dentro de otra daba un hueco falso, las astillas al borde de un tramo perdían núcleo, dos tramos traslapados de la misma caja pasaban sin aviso y la tolerancia de 1 cm se aplicaba de dos formas. Dos hallazgos eran decisiones de diseño ya escritas (un tramo que sigue en una caja que falta se registra hasta el borde de la caja, igual que en la caja; un traslape de hasta 1 cm se recorta).
++  - Al escribir los tests nuevos encontramos uno más: el fin de un tramo dentro de un intervalo contaba como fractura en el intervalo y no en el tramo.
++  - Los arreglos no los hicimos a mano: 13 tests nuevos (commit `f9b33d3`) y una segunda ronda del constructor, sesión `01a183e5-86e3-7391-89d7-257f02ae3408`, 23 llamadas. Traza: `docs/muse-code/hole-2.json`. Commit: `7d90982`. Ahora las fracturas y el núcleo suman lo mismo por tramo y por intervalo.
++  - Segundo revisor de solo lectura sobre la ronda 2: sesión `01a183ee-17c2-7872-965a-26e7a5a56b8d`, 6 llamadas. Traza: `docs/muse-code/hole-review-2.json`. Encontró cuatro errores reales más (dos tramos de la misma caja traslapados por redondeo tronaban, un hueco dentro de una caja daba un intervalo con RQD 0, el núcleo perdido entre piezas reunidas contaba como núcleo y una rotura en un límite de punto flotante como `3 * 0.3` caía un intervalo abajo). Uno estaba en nuestra propia clase `DepthPiece` y lo arreglamos nosotros con test. Quedan como decisión escrita: un tramo partido entre dos cajas cuenta la partición como fractura (el geólogo la marca mecánica en la revisión si se rompió para caber en la caja), y una caja dentro del hueco interno de otra es un límite conocido.
++  - 4 tests nuevos (commit `b715f11`) y tercera ronda del constructor: sesión `01a183f8-64f7-76f3-9315-8faf5fe87a2d`, 20 llamadas. Traza: `docs/muse-code/hole-3.json`.
++  - En total: 3 rondas del constructor y 2 del revisor, 69 llamadas. La sandbox sigue sin PowerShell; corrimos pytest y ruff fuera (320 en verde, ruff limpio). No editamos su código.
++
++- 28 oct (punto E del segundo análisis): la verificación en los hitos, `check_finding` y `check_routing` en `src/coresight/verify.py`, y `verify(..., trends)`. Muse Code 1.4.14, `--model muse-spark-1.3`, constructor y revisor como en D.
++  - Especificación: `tests/test_verify_milestones.py`, escrita antes por nosotros (commit `2e02cd2`, 23 tests). Las tendencias entre cajas (`hole.hole_trends`) y el agente de barreno los escribimos nosotros.
++  - Constructor, ronda 1: sesión `01a18410-fb19-7921-aa89-a7f0aa93faa8`, 32 llamadas. Traza: `docs/muse-code/routing-1.json`. Commit: `5653d4d`.
++  - Revisor de solo lectura (`--disable-write`): sesión `01a1841c-df12-7a23-a050-4a64d149e9f2`, 21 llamadas. Traza: `docs/muse-code/routing-review-1.json`. Encontró dos errores reales (un signo menos se perdía y "-2" pasaba como "2"; un porcentaje escrito con palabras pasaba como profundidad) y dos detalles (las tendencias desconocidas en una sola frase; finanzas pasaba sin ruta de laboratorio). Los cuatro volvieron como 6 tests nuevos (commit `1539361`); no los arreglamos a mano.
++  - Constructor, ronda 2: sesión `01a18424-7509-7df0-9a12-996019274166`, 33 llamadas. Traza: `docs/muse-code/routing-2.json`. Los 29 tests de hitos y los 20 de `verify` en verde.
++  - En total: 2 rondas del constructor y 1 del revisor, 86 llamadas. La sandbox sigue sin PowerShell; corrimos pytest y ruff fuera (383 en verde, ruff limpio). No editamos su código.
++  - Prueba real en local con la API de Meta (Nevada U12G caja 3, con la caja 1 aprobada): el código encontró 3 tendencias, el agente de barreno propuso avisar a geotecnia (3 de 3 checks, el juez respaldó 10 de 10 afirmaciones), Wonder mandó solo a seguridad (4 de 4 áreas coherentes al primer intento) y el borrador de seguridad pasó 4 de 4 checks y 11 de 11 afirmaciones. Unos 110 s, la mitad verificando.
++
++- 28 oct (punto F del segundo análisis): el ciclo de aprendizaje, `mae_of`, `fit`, `leave_one_box_out` y `learning_curve` en `src/coresight/learning.py`. Muse Code 1.4.14, `--model muse-spark-1.3`, constructor y revisor como en D y E.
++  - Especificación: `tests/test_learning.py`, escrita antes por nosotros (commit `85f6a1c`, 18 tests).
++  - Constructor, ronda 1: sesión `01a18464-3527-7f22-a9b6-2c50b9baa9a7`, 15 llamadas. Traza: `docs/muse-code/learning-1.json`. Commit: `d718864`.
++  - Revisor de solo lectura (`--disable-write`): sesión `01a18468-a270-7d61-8d57-23efb2b49741`, 11 llamadas. Traza: `docs/muse-code/learning-review-1.json`. En `learning.py`: duplicados que ganaba el último, un NaN en un candidato no usado que pasaba, ningún candidato elegible que regresaba el valor por omisión sin medirlo y un tramo repetido que pesaba doble. Volvieron como 5 tests (commit `ee530fb`). En nuestro script encontró dos errores reales: las cajas 5 y 6 de Onkalo son una sola foto (dejar una caja fuera no deja fuera su foto) y el eje del total contaba tramos por sitio. Los arreglamos nosotros: la validación cruzada ahora es por foto.
++  - Constructor, ronda 2: sesión `01a1846d-5cd8-7fd3-9770-6ad32a239c2d`, 14 llamadas. Traza: `docs/muse-code/learning-2.json`. 23 de 23 en verde.
++  - En total: 2 rondas del constructor y 1 del revisor, 40 llamadas. La sandbox sigue sin PowerShell; corrimos pytest y ruff fuera (440 en verde, ruff limpio). No editamos su código.
++  - Resultado medido (`outputs/eval/learning.md`): desde los umbrales por omisión, Nevada fuera de muestra queda en 15.1 puntos (no había nada que aprender); desde un sitio mal ajustado baja de 21.6 a 16.6 con las correcciones de la otra foto. Queda como "listo para aprender", sin presumir mejora. Las correcciones de descripción entran como few-shot a Spark y Glimmer; sin descripciones de un geólogo públicas para medir, no se presume.
++
++- 30 oct (punto 7 del tercer análisis): `check_role` en `src/coresight/verify.py`, la regla determinista que impide que un borrador le diga a la operación que pare ("Do not continue drilling until..."), y su llamada en `verify` y `check_finding`. Muse Code 1.4.14, `--model muse-spark-1.3`, constructor y revisor como en D, E y F.
++  - Especificación: `tests/test_verify_role.py`, escrita antes por nosotros (commit `3252a1d`, 32 tests). La lista cerrada de acciones (`schemas.DraftAction`) y la instrucción al juez las escribimos nosotros.
++  - Constructor, ronda 1: sesión `01a1854c-adb6-7981-b7b3-367fe18b3b11`, 18 llamadas. Traza: `docs/muse-code/role-1.json`. Commit: `8093263`.
++  - Revisor de solo lectura (`--disable-write`): sesión `01a1855a-ec2a-7611-bdd1-412fd2b23ce8`, 4 llamadas. Traza: `docs/muse-code/role-review-1.json`. Seis errores reales: un "Stop and get geotech review." al inicio del cuerpo pasaba porque el título se pegaba sin punto; `until` solo se buscaba una vez; un salto de línea no cerraba la oración; una coincidencia podía cruzar de una oración o de un campo a otro (y rechazar "Do not mix samples. Drilling continues"); unas comillas después de dos puntos escondían la orden. Volvieron como 8 tests (commit `fa3b5de`); no los arreglamos a mano.
++  - Constructor, ronda 2: sesión `01a18564-2d84-7920-bbb8-d725b6c00c7f`, 33 llamadas. Traza: `docs/muse-code/role-2.json`. 40 de 40 en verde.
++  - En total: 2 rondas del constructor y 1 del revisor, 55 llamadas. La sandbox sigue sin PowerShell; corrimos pytest y ruff fuera (498 en verde, ruff limpio). No editamos su código.
++  - Prueba con los textos reales de Spark: rechaza "Do not continue drilling until the safety team reviews.", "Before the next run: stop and get geotech review." y "Do not drill ahead without geotechnical review."; deja pasar "needs geotech review before further drilling" y "have a geotechnical review before the next run".
++
++## Alcance ampliado (decidido el 26 oct)
++Raúl decidió ir más allá de lo prometido: núcleo profundo más agentes que llevan el dato a otras áreas de la mina.
++
++| # | Compromiso nuevo | Modelo de Meta | Día |
++|---|---|---|---|
++| 9 | Orquestador que decide qué áreas se ven afectadas por una caja aprobada | Muse Wonder | 8 |
++| 10 | 4 agentes de área con borradores y aprobación humana: laboratorio, seguridad y geotecnia, planta, finanzas | Muse Spark 1.3 con herramientas | 8 |
++| 11 | Correcciones dictadas por voz en la UI de revisión (`meta_client.transcribe`) | Muse Voice Transcribe | 7 |
++| 12 | Descripción con modelo abierto en infraestructura propia (modo sin internet en la mina) | Muse Glimmer, plan B Muse Spark Open | 6 |
++| 13 | Evaluación científica: MAE, Bland-Altman, ablaciones, robustez, costo y tiempo por caja | Todos | 5 y 9 |
++| 14 | Video con HyperFrames y voz | (herramienta de video) | 10 |
++
++El compromiso 6 (handoffs a laboratorio y seguridad) queda cubierto por el 10.
++
+ 
+ ## Visión (no es compromiso del hackathon)
+-CoreSight es el primer módulo de una capa de agentes que conecte los departamentos de una mina (operaciones, laboratorio, seguridad, administración y finanzas). Va en el pitch y en el video, no en el alcance.
++CoreSight es el primer módulo de una capa de agentes que conecte los departamentos de una mina. En el hackathon se construyen laboratorio, seguridad, planta y finanzas. Mantenimiento, operaciones y administración van en el pitch y en el video, no en el código.
+diff --git a/pyproject.toml b/pyproject.toml
+index 9160bc4..59f5691 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -9,2 +9,3 @@ description = "Automated drill-core logging from core box photos (SAM 3.1 + Muse
+ readme = "README.md"
++license = { text = "Apache-2.0" }
+ requires-python = ">=3.11"
+@@ -16,2 +17,3 @@ dependencies = [
+     "fastapi",
++    "python-multipart",  # photo and audio uploads
+     "uvicorn",
+@@ -19,2 +21,3 @@ dependencies = [
+     "python-dotenv",
++    "meta-sam-parser>=0.1.0",  # official SAM 3.1 mask decoder (SAM License)
+ ]
+@@ -27,2 +30,5 @@ where = ["src"]
+ 
++[tool.setuptools.package-data]
++coresight = ["web/*.html"]
++
+ [tool.pytest.ini_options]
+diff --git a/scripts/fetch_public_images.py b/scripts/fetch_public_images.py
+index 28bbd57..394ce81 100644
+--- a/scripts/fetch_public_images.py
++++ b/scripts/fetch_public_images.py
+@@ -61,2 +61,17 @@ IMAGES: dict[str, str] = {
+     ),
++    # Day 8: full boxes of broken core, candidates for the "dramatic" demo sample.
++    "commons_breidalsvik.jpg": "File:Drill Cores, in Drill Core Library in Breiðdalsvík.jpg",
++    "commons_nts_u12g_1.jpg": (
++        "File:CORE SAMPLES, NEVADA TEST SITE - DPLA - db76f1349ca15c6259411296fd16eef3.jpg"
++    ),
++    "commons_nts_u12g_2.jpg": (
++        "File:CORE SAMPLES, NEVADA TEST SITE - DPLA - 5eb8f78b3e71b2e05f1806559ea3b012.jpg"
++    ),
++    "commons_nts_1981.jpg": (
++        "File:CORE SAMPLES, NEVADA TEST SITE - DPLA - 344a80c6542b9421f65b34db561bdfcf.jpg"
++    ),
++    "commons_diamond_core.jpg": "File:Diamond Core.jpeg",
++    "commons_butte_broken_1.jpg": (
++        "File:Broken drill core (Butte Mining District, Montana, USA) 1.jpg"
++    ),
+ }
+diff --git a/scripts/smoke_day1.py b/scripts/smoke_day1.py
+index 76be71c..d938847 100644
+--- a/scripts/smoke_day1.py
++++ b/scripts/smoke_day1.py
+@@ -9,4 +9,3 @@ scripts/fetch_public_images.py. Outputs go to outputs/smoke/.
+ 
+-If meta_sam_parser is installed (pip install meta-sam-parser, SAM License),
+-the masks are also decoded and drawn on the photo.
++The SAM masks are decoded with meta_sam_parser (SAM License) and drawn on the photo.
+ """
+@@ -24,3 +23,3 @@ import numpy as np
+ 
+-from coresight.meta_client import MetaClient, parse_sam_text
++from coresight.meta_client import MetaClient, parse_sam_text, sam_masks
+ 
+@@ -44,20 +43,12 @@ def load_png(path: Path) -> tuple[np.ndarray, bytes]:
+ 
+-def draw_masks(image: np.ndarray, records: list[dict], out_path: Path) -> bool:
+-    try:
+-        from meta_sam_parser import decode_mask_to_raster
+-    except ImportError:
+-        return False
++def draw_masks(image: np.ndarray, raw: str, out_path: Path) -> None:
++    """Each mask filled in its own color, pasted at its bounds, with its box."""
+     overlay = image.copy()
+     rng = np.random.default_rng(0)
+-    for record in records:
+-        height, width = (int(v) for v in record["mask"].split(",")[:2])
+-        raster = np.asarray(decode_mask_to_raster(record["mask"]), dtype=np.uint8)
+-        mask = cv2.resize(raster.reshape(height, width), image.shape[1::-1]) > 0
+-        overlay[mask] = rng.integers(60, 255, 3)
+-        b = record["box"]
+-        cv2.rectangle(
+-            overlay, (int(b["x1"]), int(b["y1"])), (int(b["x2"]), int(b["y2"])), (0, 0, 255), 2
+-        )
+-    cv2.imwrite(str(out_path), cv2.addWeighted(image, 0.5, overlay, 0.5, 0))
+-    return True
++    for obj in sam_masks(raw):
++        left, top, right, bottom = obj["bounds"]
++        region = overlay[top:bottom, left:right]
++        region[obj["mask"][: region.shape[0], : region.shape[1]]] = rng.integers(60, 255, 3)
++        cv2.rectangle(overlay, (left, top), (right, bottom), (0, 0, 255), 2)
++    cv2.imwrite(str(out_path), cv2.addWeighted(image, 0.4, overlay, 0.6, 0))
+ 
+@@ -75,6 +66,5 @@ def run_sam(client: MetaClient, path: Path, prompt: str) -> bool:
+         print(f"  id={record['id']} box={record['box']}")
+-    if records and draw_masks(image, records, OUT_DIR / "sam_overlay.png"):
++    if records:
++        draw_masks(image, raw, OUT_DIR / "sam_overlay.png")
+         print("  overlay in outputs/smoke/sam_overlay.png")
+-    elif records:
+-        print("  meta_sam_parser not installed: masks not drawn")
+     return bool(records)
+@@ -98,3 +88,5 @@ def main() -> int:
+     parser.add_argument("--sam-image", type=Path, default=ROOT / "data/raw/commons_onkalo_1.jpg")
+-    parser.add_argument("--prompt", default="drill core piece")
++    # Tried on Onkalo 1 (Oct 26): "stone" 16 objects (c 0.8-0.9), "rock" 14 (c ~0.55),
++    # "cylinder" 28 incl. box frame; "drill core", "core sample", "wooden box" 0.
++    parser.add_argument("--prompt", default="stone")
+     parser.add_argument("--muse-image", type=Path, default=ROOT / "data/raw/commons_potter_27.jpg")
+diff --git a/src/coresight/geometry.py b/src/coresight/geometry.py
+index 94706d1..787865b 100644
+--- a/src/coresight/geometry.py
++++ b/src/coresight/geometry.py
+@@ -151 +151,465 @@ def rock_quality_class(rqd: float) -> str:
+     return "excellent"
++
++
++def combined_rqd(runs: Iterable[tuple[float, float, float]]) -> float:
++    """RQD of several runs taken together, from ``(from_m, to_m, rqd_pct)`` of each.
++
++    Each run's intact length >= 10 cm is its RQD times its length, so the runs
++    together have the summed intact length over the summed length (Deere).
++    """
++    runs = list(runs)
++    length = sum(to - fr for fr, to, _ in runs)
++    if not runs or length <= _EPS:
++        raise ValueError("combined_rqd needs at least one run with length")
++    if any(to - fr <= 0 or not 0 <= rqd <= 100 + _EPS for fr, to, rqd in runs):
++        raise ValueError("each run needs to_m > from_m and an RQD between 0 and 100")
++    return sum((to - fr) * rqd for fr, to, rqd in runs) / length
++
++
++# --- Drill hole: boxes joined by depth (point D) -----------------------------
++#
++# A hole is the approved boxes of one drill hole laid end to end by depth. Box
++# runs give their pieces in metres from the collar (``DepthPiece``). Recovered
++# core is laid from the top of each run, as ``log_interval`` assumes.
++
++DEPTH_TOL_M = 0.01  # gaps and overlaps up to 1 cm are rounding, not a problem
++
++
++@dataclass(frozen=True)
++class DepthPiece:
++    from_m: float
++    to_m: float
++    mechanical_break_after: bool = False
++    uncertain_break_after: bool = False
++
++    def __post_init__(self) -> None:
++        if not (math.isfinite(self.from_m) and math.isfinite(self.to_m)):
++            raise ValueError("piece depths must be finite numbers")
++        if self.to_m <= self.from_m:
++            raise ValueError(
++                f"piece to_m ({self.to_m}) must be greater than from_m ({self.from_m})"
++            )
++        if self.mechanical_break_after and self.uncertain_break_after:
++            raise ValueError("a break cannot be both mechanical and uncertain")
++
++
++@dataclass(frozen=True)
++class BoxRun:
++    """One run, or the part of a run, as logged in one box."""
++
++    box: int
++    from_m: float
++    to_m: float
++    pieces: tuple[DepthPiece, ...]
++    complete: bool = True  # False: the run continues in the previous or next box
++
++
++@dataclass(frozen=True)
++class DepthIssue:
++    kind: str  # "gap" (no box covers it) or "overlap" (two boxes claim it)
++    from_m: float
++    to_m: float
++    box_before: int
++    box_after: int
++
++
++@dataclass(frozen=True)
++class WeakZone:
++    """Consecutive fixed intervals with RQD below the zone threshold."""
++
++    from_m: float
++    to_m: float
++    rqd_pct: float  # length weighted over the zone
++    min_rqd_pct: float
++    intervals: int
++
++
++@dataclass(frozen=True)
++class HoleLog:
++    boxes: tuple[tuple[int, float, float], ...]  # (box, from_m, to_m), by depth
++    issues: tuple[DepthIssue, ...]
++    runs: tuple[IntervalLog, ...]
++    intervals: tuple[IntervalLog, ...]
++    zones: tuple[WeakZone, ...]
++
++
++def _box_extents(runs: list[BoxRun]) -> list[tuple[int, float, float]]:
++    """One (box, from_m, to_m) per box number, sorted by from_m."""
++    ends: dict[int, list[float]] = {}
++    for r in runs:
++        if r.box in ends:
++            ends[r.box][0] = min(ends[r.box][0], r.from_m)
++            ends[r.box][1] = max(ends[r.box][1], r.to_m)
++        else:
++            ends[r.box] = [r.from_m, r.to_m]
++    items = ((box, v[0], v[1]) for box, v in ends.items())
++    return sorted(items, key=lambda b: (b[1], b[0]))
++
++
++def _depth_issues(
++    boxes: list[tuple[int, float, float]],
++) -> list[DepthIssue]:
++    """Gaps and overlaps against the deepest end reached so far."""
++    issues: list[DepthIssue] = []
++    deepest_box, _, deepest_end = boxes[0]
++    for box, start, end in boxes[1:]:
++        if start > deepest_end + DEPTH_TOL_M:
++            issues.append(DepthIssue("gap", deepest_end, start, deepest_box, box))
++        elif start < deepest_end - DEPTH_TOL_M:
++            overlap_to = min(deepest_end, end)
++            issues.append(DepthIssue("overlap", start, overlap_to, deepest_box, box))
++        if end > deepest_end:
++            deepest_box, deepest_end = box, end
++    return issues
++
++
++def _check_box_overlaps(runs: list[BoxRun]) -> None:
++    """Runs of one box must not overlap more than the tolerance."""
++    by_box: dict[int, list[BoxRun]] = {}
++    for r in runs:
++        by_box.setdefault(r.box, []).append(r)
++    for box, group in by_box.items():
++        ordered = sorted(group, key=lambda r: (r.from_m, r.to_m))
++        deepest_to = ordered[0].to_m
++        for nxt in ordered[1:]:
++            if nxt.from_m < deepest_to - DEPTH_TOL_M:
++                raise ValueError(f"box {box} has overlapping runs")
++            deepest_to = max(deepest_to, nxt.to_m)
++
++
++def _clip_depth_pieces(
++    pieces: Iterable[DepthPiece], start: float, end: float
++) -> tuple[DepthPiece, ...]:
++    """Depth pieces cut to [start, end); slivers dropped, flags kept."""
++    kept: list[DepthPiece] = []
++    for p in pieces:
++        s = max(p.from_m, start)
++        e = min(p.to_m, end)
++        if e - s <= _EPS / 100.0:
++            continue
++        kept.append(DepthPiece(s, e, p.mechanical_break_after, p.uncertain_break_after))
++    return tuple(kept)
++
++
++def _cut_rounding_overlaps(runs: list[BoxRun]) -> list[BoxRun]:
++    """Cut same-box overlaps within tolerance; the earlier run wins."""
++    by_box: dict[int, list[BoxRun]] = {}
++    for r in runs:
++        by_box.setdefault(r.box, []).append(r)
++    trimmed: list[BoxRun] = []
++    for group in by_box.values():
++        ordered = sorted(group, key=lambda r: (r.from_m, r.to_m))
++        deepest_to = float("-inf")
++        for r in ordered:
++            start = max(r.from_m, deepest_to)
++            if start >= r.to_m:
++                continue
++            pieces = _clip_depth_pieces(r.pieces, start, r.to_m)
++            trimmed.append(BoxRun(r.box, start, r.to_m, pieces, r.complete))
++            deepest_to = max(deepest_to, r.to_m)
++    return trimmed
++
++
++def _intra_box_gaps(runs: list[BoxRun]) -> list[DepthIssue]:
++    """Gaps between runs of one box; box_before and box_after are that box."""
++    issues: list[DepthIssue] = []
++    by_box: dict[int, list[BoxRun]] = {}
++    for r in runs:
++        by_box.setdefault(r.box, []).append(r)
++    for box, group in by_box.items():
++        ordered = sorted(group, key=lambda r: (r.from_m, r.to_m))
++        deepest_to = ordered[0].to_m
++        for nxt in ordered[1:]:
++            if nxt.from_m > deepest_to + DEPTH_TOL_M:
++                issues.append(DepthIssue("gap", deepest_to, nxt.from_m, box, box))
++            deepest_to = max(deepest_to, nxt.to_m)
++    return issues
++
++
++def _cut_overlaps(
++    runs: list[BoxRun], boxes: list[tuple[int, float, float]]
++) -> list[BoxRun]:
++    """Cut later boxes to start where earlier boxes end; drop emptied runs."""
++    by_box: dict[int, list[BoxRun]] = {}
++    for r in runs:
++        by_box.setdefault(r.box, []).append(r)
++    trimmed: list[BoxRun] = []
++    covered_to = float("-inf")
++    for box, _, box_to in boxes:
++        for r in by_box.get(box, []):
++            start = max(r.from_m, covered_to)
++            if start >= r.to_m:
++                continue
++            pieces = _clip_depth_pieces(r.pieces, start, r.to_m)
++            trimmed.append(BoxRun(r.box, start, r.to_m, pieces, r.complete))
++        covered_to = max(covered_to, box_to)
++    return trimmed
++
++
++def _join_parts(
++    runs: list[BoxRun],
++) -> list[tuple[float, float, list[DepthPiece]]]:
++    """Group split runs (incomplete, different boxes, contiguous) into one."""
++    ordered = sorted(runs, key=lambda r: (r.from_m, r.to_m, r.box))
++    groups: list[list[BoxRun]] = []
++    for r in ordered:
++        if groups:
++            prev = groups[-1][-1]
++            gap = r.from_m - prev.to_m
++            if (
++                not prev.complete
++                and not r.complete
++                and prev.box != r.box
++                and gap <= DEPTH_TOL_M
++                and gap >= -DEPTH_TOL_M
++            ):
++                groups[-1].append(r)
++                continue
++        groups.append([r])
++    joined: list[tuple[float, float, list[DepthPiece]]] = []
++    for group in groups:
++        pieces: list[DepthPiece] = []
++        for part in group:
++            pieces.extend(part.pieces)
++        pieces.sort(key=lambda p: p.from_m)
++        joined.append((group[0].from_m, group[-1].to_m, pieces))
++    return joined
++
++
++def _as_run_pieces(pieces: list[DepthPiece], from_m: float) -> list[Piece]:
++    """Depth pieces as cm from the run start, flags kept."""
++    return [
++        Piece(
++            (p.from_m - from_m) * 100.0,
++            (p.to_m - from_m) * 100.0,
++            p.mechanical_break_after,
++            p.uncertain_break_after,
++        )
++        for p in pieces
++    ]
++
++
++def _cover_stretches(runs: list[BoxRun]) -> list[tuple[float, float]]:
++    """Union of run depths; gaps wider than tolerance split the cover."""
++    ordered = sorted((r.from_m, r.to_m) for r in runs)
++    start, end = ordered[0]
++    stretches: list[tuple[float, float]] = []
++    for s_from, s_to in ordered[1:]:
++        if s_from > end + DEPTH_TOL_M:
++            stretches.append((start, end))
++            start, end = s_from, s_to
++        else:
++            end = max(end, s_to)
++    stretches.append((start, end))
++    return stretches
++
++
++def _fixed_bounds(
++    stretches: list[tuple[float, float]], step_m: float
++) -> list[tuple[float, float]]:
++    """Grid intervals cut to the cover; short edges merged into neighbours."""
++    bounds: list[tuple[float, float]] = []
++    half = step_m / 2.0
++    for s_from, s_to in stretches:
++        k_start = math.floor(s_from / step_m)
++        k_end = math.ceil(s_to / step_m)
++        raw: list[tuple[float, float]] = []
++        for k in range(k_start, k_end):
++            a = max(s_from, k * step_m)
++            b = min(s_to, (k + 1) * step_m)
++            if b > a:
++                raw.append((a, b))
++        if not raw:
++            continue
++        if len(raw) == 1:
++            bounds.append(raw[0])
++            continue
++        merged = raw
++        if merged[0][1] - merged[0][0] < half:
++            merged = [(merged[0][0], merged[1][1])] + merged[2:]
++        if len(merged) > 1 and merged[-1][1] - merged[-1][0] < half:
++            merged = merged[:-2] + [(merged[-2][0], merged[-1][1])]
++        bounds.extend(merged)
++    return bounds
++
++
++def _intact_and_fractures(
++    joined: list[tuple[float, float, list[DepthPiece]]],
++) -> tuple[list[list[DepthPiece]], list[tuple[float, bool]]]:
++    """Intact groups and fracture depths from joined runs.
++
++    Mechanical breaks rejoin inside a run; the end of every intact group
++    but the last of the run is a fracture the run log counts.
++    """
++    groups: list[list[DepthPiece]] = []
++    fractures: list[tuple[float, bool]] = []
++    for _, _, pieces in joined:
++        if not pieces:
++            continue
++        current: list[DepthPiece] = []
++        for i, p in enumerate(pieces):
++            current.append(p)
++            is_last = i == len(pieces) - 1
++            if p.mechanical_break_after and not is_last:
++                continue
++            groups.append(current)
++            current = []
++            if not is_last:
++                fractures.append((p.to_m, p.uncertain_break_after))
++    return groups, fractures
++
++
++def _cut_for_interval(
++    groups: list[list[DepthPiece]], from_m: float, to_m: float
++) -> list[Piece]:
++    """Intact groups clipped to one fixed interval, rejoined inside it."""
++    out: list[Piece] = []
++    for group in groups:
++        clipped: list[tuple[float, float]] = []
++        for p in group:
++            if p.to_m <= from_m or p.from_m >= to_m:
++                continue
++            s = max(p.from_m, from_m)
++            e = min(p.to_m, to_m)
++            if e - s <= _EPS / 100.0:
++                continue
++            clipped.append((s, e))
++        for j, (s, e) in enumerate(clipped):
++            out.append(
++                Piece(
++                    (s - from_m) * 100.0,
++                    (e - from_m) * 100.0,
++                    mechanical_break_after=j < len(clipped) - 1,
++                )
++            )
++    return out
++
++
++def _weak_zones(
++    intervals: tuple[IntervalLog, ...],
++    zone_max_rqd: float,
++    zone_min_intervals: int,
++) -> tuple[WeakZone, ...]:
++    """Groups of poor, contiguous intervals long enough to be a zone."""
++    zones: list[WeakZone] = []
++    group: list[IntervalLog] = []
++
++    def flush() -> None:
++        if len(group) >= zone_min_intervals:
++            rqd = sum(i.rqd_cm for i in group)
++            length = sum(i.run_length_cm for i in group)
++            zones.append(
++                WeakZone(
++                    group[0].from_m,
++                    group[-1].to_m,
++                    rqd / length * 100.0,
++                    min(i.rqd_pct for i in group),
++                    len(group),
++                )
++            )
++        group.clear()
++
++    for iv in intervals:
++        contiguous = not group or iv.from_m - group[-1].to_m <= DEPTH_TOL_M
++        if iv.rqd_pct < zone_max_rqd and contiguous:
++            group.append(iv)
++        else:
++            flush()
++            if iv.rqd_pct < zone_max_rqd:
++                group.append(iv)
++    flush()
++    return tuple(zones)
++
++
++def pieces_at_depth(pieces: Iterable[Piece], from_m: float, to_m: float) -> list[DepthPiece]:
++    """Run pieces (cm from the run start) as depths in metres, cut at ``to_m``.
++
++    Depths are ``from_m + cm / 100``; flags are kept as given.
++    """
++    if not (math.isfinite(from_m) and math.isfinite(to_m)):
++        raise ValueError("interval depths must be finite numbers")
++    if to_m <= from_m:
++        raise ValueError(f"to_m ({to_m}) must be greater than from_m ({from_m})")
++    out: list[DepthPiece] = []
++    for p in pieces:
++        start_m = from_m + p.start_cm / 100.0
++        end_m = from_m + p.end_cm / 100.0
++        if start_m >= to_m or end_m <= from_m:
++            continue
++        s = max(start_m, from_m)
++        e = min(end_m, to_m)
++        if e - s <= _EPS / 100.0:
++            continue
++        out.append(DepthPiece(s, e, p.mechanical_break_after, p.uncertain_break_after))
++    return out
++
++
++def log_hole(
++    runs: Iterable[BoxRun],
++    step_m: float = 1.0,
++    zone_max_rqd: float = 50.0,
++    zone_min_intervals: int = 2,
++) -> HoleLog:
++    """Join the runs of a hole's boxes by depth and log it by run and by fixed interval.
++
++    Boxes are sorted by depth; gaps and overlaps reported; runs joined and logged.
++    """
++    runs_list = list(runs)
++    if not runs_list:
++        raise ValueError("hole has no runs")
++    if not (math.isfinite(step_m) and step_m >= 0.1):
++        raise ValueError(f"step_m ({step_m}) must be at least 0.1 m")
++    if zone_min_intervals < 1:
++        raise ValueError(
++            f"zone_min_intervals ({zone_min_intervals}) must be at least 1"
++        )
++    for r in runs_list:
++        if not (math.isfinite(r.from_m) and math.isfinite(r.to_m)):
++            raise ValueError("run depths must be finite numbers")
++        if r.to_m <= r.from_m:
++            raise ValueError(
++                f"run to_m ({r.to_m}) must be greater than from_m ({r.from_m})"
++            )
++    _check_box_overlaps(runs_list)
++    boxes = _box_extents(runs_list)
++    between = _depth_issues(boxes)
++    within = _intra_box_gaps(runs_list)
++    issues = tuple(sorted(between + within, key=lambda i: (i.from_m, i.to_m)))
++    trimmed = _cut_overlaps(_cut_rounding_overlaps(runs_list), boxes)
++    joined = _join_parts(trimmed)
++    run_logs = tuple(
++        log_interval(_as_run_pieces(pieces, f), f, t) for f, t, pieces in joined
++    )
++    groups, fractures = _intact_and_fractures(joined)
++    stretches = _cover_stretches(trimmed)
++    bounds = _fixed_bounds(stretches, step_m)
++    counts = [[0, 0] for _ in bounds]
++    for depth, uncertain in fractures:
++        for idx, (a, b) in enumerate(bounds):
++            if a - _EPS <= depth <= b + _EPS:
++                counts[idx][0] += 1
++                if uncertain:
++                    counts[idx][1] += 1
++                break
++    from dataclasses import replace
++
++    logs: list[IntervalLog] = []
++    for (a, b), (nat, unc) in zip(bounds, counts, strict=True):
++        base = log_interval(_cut_for_interval(groups, a, b), a, b)
++        logs.append(
++            replace(
++                base,
++                natural_fractures=nat,
++                uncertain_breaks=unc,
++                fracture_frequency_per_m=nat / (b - a),
++            )
++        )
++    interval_logs = tuple(logs)
++    zones = _weak_zones(interval_logs, zone_max_rqd, zone_min_intervals)
++    return HoleLog(
++        boxes=tuple(boxes),
++        issues=issues,
++        runs=run_logs,
++        intervals=interval_logs,
++        zones=zones,
++    )
+diff --git a/src/coresight/meta_client.py b/src/coresight/meta_client.py
+index 83eb82d..e33577a 100644
+--- a/src/coresight/meta_client.py
++++ b/src/coresight/meta_client.py
+@@ -4,5 +4,13 @@ Endpoints, model IDs and request shapes come from the official docs
+ (https://dev.meta.ai/docs/, read 2026-10-25): sam/segmenting,
+-sam/reading-segmentation, image-understanding and structured-output.
+-Not yet run against a real key: the day 1 smoke test
+-(scripts/smoke_day1.py) is what confirms them.
++sam/reading-segmentation, image-understanding (with perception grounding, read 2026-10-28) and
++structured-output; voice
++from speech-to-text, api-reference/voice/transcribe and voice/schemas (read
++2026-10-26); agents from overview (muse-wonder-1.0 takes the same requests
++as Muse Spark) and tool-calling (Responses API function tools, read
++2026-10-27).
++Confirmed against the real API by the day 1 smoke test (scripts/smoke_day1.py).
++
++SAM responses are cached on disk by a hash of model, prompt and image, so the
++same row is never paid for twice, and transient failures (timeouts, 429, 5xx)
++are retried with exponential backoff.
+ """
+@@ -12,2 +20,3 @@ from __future__ import annotations
+ import base64
++import hashlib
+ import json
+@@ -15,7 +24,22 @@ import os
+ import re
++import threading
++import time
++from collections.abc import Callable, Sequence
++from dataclasses import dataclass
++from pathlib import Path
+ 
++import cv2
+ import httpx
++import numpy as np
+ from dotenv import load_dotenv
++from meta_sam_parser import CompletedOutcome, decode_mask_to_raster, image_segmentation_format
+ 
+-from coresight.schemas import GeologyDescription
++from coresight.describe import cached_description, describe_prompt
++from coresight.schemas import (
++    GeologyDescription,
++    ModelDescription,
++    RowLocation,
++    Transcript,
++    TrayCheck,
++)
+ 
+@@ -24,6 +48,44 @@ SAM_MODEL_ID = "sam-3.1"
+ MUSE_SPARK_MODEL_ID = "muse-spark-1.3"
++MUSE_WONDER_MODEL_ID = "muse-wonder-1.0"  # in preview (docs: overview)
+ RESPONSES_PATH = "/responses"
++VOICE_MODEL_ID = "muse-voice-transcribe-1.0"
++TRANSCRIBE_PATH = "/asr/transcribe"
++VOICE_LANGUAGES = ["Spanish", "English"]  # a hint, not a hard setting (docs: languageBias)
++DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache"
++RETRY_STATUS = {408, 429, 500, 502, 503, 504}
++TRAY_CHECK_PROMPT = """\
++You are the first check of a drill-core logging system. Look at the whole photo.
++Is it a photo of a drill core tray (a core box): a tray with several parallel rows
++of rock core, taken from above? Answer is_core_tray false for anything else, for
++example a screenshot of software or a web page, a person or a selfie, a document,
++a landscape, or one or two pieces of core held or laid out without a tray.
++what_it_shows: what the photo shows, in a few words. confidence: how sure you are
++of is_core_tray, from 0 to 1."""
++
++# Grounding prompt (docs: image-understanding, "Perception grounding"): boxes in a
++# 0 to 1000 grid of the image sent, x first; "object grounding expert" and "do not
++# miss" are the docs' advice for recall.
++LOCATE_PROMPT = """\
++You are an object grounding expert. This image is one row of a drill core tray seen
++from above: pieces of rock core lie end to end along the row, from left to right,
++between two wooden slats. Find every object lying in the row and give each one a
++tight bounding box in a 0 to 1000 grid of this image: (0, 0) is the top left corner
++and (1000, 1000) the bottom right, x from left to right, y from top to bottom.
++kind of each object:
++- core: one piece of rock core. Where the core is broken, give each piece its own
++  box. Include short pieces and rubble.
++- run_block: a block that marks the end of a drilling run (wood or foam, often with
++  a depth written on it).
++- card: a card, tag or label.
++- waxed_sample: core wrapped in wax, foil or plastic, taken as a sample.
++- other: anything else in the row that is not rock core (a bag, a tool, a spacer).
++- empty: a stretch of the row with no core in it: bare wood or the tray floor, an
++  empty compartment, or a whole row left empty. Give it one box over its whole length.
++  Paint, marks or stains on the wood are not core.
++Do not box the slats or the tray walls. Do not miss any piece."""
+ 
+-# One SAM record: "<id><|box;...|><|mask;...|>" (docs: sam/reading-segmentation).
+-_RECORD = re.compile(r"(\d+)<\|box;([^|]*)\|><\|mask;([^|]*)\|>")
++# One SAM record: "<id><|box;...|><|mask;...;data=H,W,ENC payload|>" (docs:
++# sam/reading-segmentation). The box token has no payload, so records are found
++# by their box; the base85 mask payload can itself contain "|", ">" and ",".
++_RECORD_START = re.compile(r"(\d+)<\|box;([^|]*)\|><\|mask;")
+ 
+@@ -47,9 +109,12 @@ def parse_sam_text(text: str) -> list[dict]:
+     Each record: {"id", "box": {x1, y1, x2, y2, w, h[, c]}, "mask": "H,W,ENC payload"}.
+-    Decoding the mask raster needs the official meta_sam_parser package.
++    Use sam_masks() for the decoded rasters.
+     """
++    starts = list(_RECORD_START.finditer(text))
+     records = []
+-    for obj_id, box_body, mask_body in _RECORD.findall(text):
+-        box = {k: float(v) for k, v in _fields(box_body).items()}
+-        mask = _fields(mask_body)
+-        records.append({"id": int(obj_id), "box": box, "mask": mask.get("data", "")})
++    for i, match in enumerate(starts):
++        end = starts[i + 1].start() if i + 1 < len(starts) else len(text)
++        mask_body = text[match.end() : end].rstrip().removesuffix(",").removesuffix("|>")
++        _, _, data = mask_body.partition("data=")
++        box = {k: float(v) for k, v in _fields(match.group(2)).items()}
++        records.append({"id": int(match.group(1)), "box": box, "mask": data})
+     return records
+@@ -57,2 +122,158 @@ def parse_sam_text(text: str) -> list[dict]:
+ 
++def sam_masks(text: str) -> list[dict]:
++    """Decoded masks of a single-image SAM response, via the official meta_sam_parser.
++
++    Each mask comes cropped to its object's bounds. Returns one dict per object:
++    {"id", "bounds": (left, top, right, bottom), "confidence", "mask"} where "mask"
++    is a bool array of shape (bottom - top, right - left) in source pixels.
++    """
++    parser = image_segmentation_format().create_parser()
++    parser.push(text)
++    result = parser.finish(CompletedOutcome()).result
++    out = []
++    for record in result.records:
++        if record.kind != "mask":
++            continue
++        m, b = record.mask, record.bounds
++        raster = np.frombuffer(decode_mask_to_raster(m), dtype=np.uint8)
++        raster = raster.reshape(m.height, m.width)
++        size = (b.right - b.left, b.bottom - b.top)
++        if raster.shape[::-1] != size:
++            raster = cv2.resize(raster, size, interpolation=cv2.INTER_NEAREST)
++        out.append(
++            {
++                "id": int(record.object_id),
++                "bounds": (b.left, b.top, b.right, b.bottom),
++                "confidence": record.confidence,
++                "mask": raster > 0,
++            }
++        )
++    return out
++
++
++MAX_SAM_OBJECTS = 16  # objects per box and point prompt (docs: sam/segmenting)
++
++
++@dataclass(frozen=True)
++class SamPoint:
++    """A point prompt in pixels of the image sent; negative means "not this object"."""
++
++    x: float
++    y: float
++    positive: bool = True
++
++
++@dataclass(frozen=True)
++class SamObject:
++    """One object of a box and point prompt: our id, at most one box, then its points.
++
++    box is (x1, y1, x2, y2) in pixels of the image sent, x2 and y2 inclusive.
++    SAM answers under the same id, so each mask can be tied back to its prompt.
++    """
++
++    id: int
++    box: tuple[float, float, float, float] | None = None
++    points: tuple[SamPoint, ...] = ()
++
++
++def _prompt_image_size(size: tuple[int, int]) -> tuple[int, int]:
++    """(w, h) checked to be positive whole pixels."""
++    try:
++        w, h = size
++    except (TypeError, ValueError):
++        raise ValueError(f"image size must be (w, h), got {size!r}") from None
++    for n in (w, h):
++        if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
++            raise ValueError(f"image size must be positive whole pixels, got {size!r}")
++    return w, h
++
++
++def _prompt_pixel(value: float, what: str) -> int:
++    """A prompt coordinate floored to a whole pixel, as the API does."""
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise ValueError(f"{what} must be a number, got {value!r}")
++    try:
++        return int(value // 1)
++    except (OverflowError, ValueError):
++        raise ValueError(f"{what} out of range: {value!r}") from None
++
++
++def _grid_pixel(value: float, n: int) -> int:
++    """A 0 to 1000 grid coordinate as a clamped pixel of a side ``n``."""
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise ValueError(f"grid coordinate must be a number, got {value!r}")
++    try:
++        pixel = int(value * n // 1000)  # 1000 scales to n, clamped to n - 1 below
++    except (OverflowError, ValueError):
++        raise ValueError(f"grid coordinate out of range: {value!r}") from None
++    return max(0, min(pixel, n - 1))
++
++
++def sam_prompt(objects: Sequence[SamObject], size: tuple[int, int]) -> str:
++    """The input_text of a SAM 3.1 box and point prompt for one image of ``size`` (w, h).
++
++    Raises ValueError when the API would refuse it. Spec: tests/test_sam_prompts.py.
++    """
++    w, h = _prompt_image_size(size)
++    if not objects:
++        raise ValueError("at least one object")
++    if len(objects) > MAX_SAM_OBJECTS:
++        raise ValueError(f"at most {MAX_SAM_OBJECTS} objects, got {len(objects)}")
++    seen = set()
++    rendered = []
++    for obj in objects:
++        if isinstance(obj.id, bool) or not isinstance(obj.id, int) or obj.id < 0:
++            raise ValueError(f"object id must be a whole number from 0, got {obj.id!r}")
++        if obj.id in seen:
++            raise ValueError(f"duplicate object id {obj.id}")
++        seen.add(obj.id)
++        if obj.box is None and not any(p.positive for p in obj.points):
++            raise ValueError(f"object {obj.id} needs a box or a positive point")
++        chunk = [str(obj.id)]
++        if obj.box is not None:
++            try:
++                bx1, by1, bx2, by2 = obj.box
++            except (TypeError, ValueError):
++                raise ValueError(f"object {obj.id} box must be (x1, y1, x2, y2)") from None
++            what = f"object {obj.id} box"
++            x1 = _prompt_pixel(bx1, what)
++            y1 = _prompt_pixel(by1, what)
++            x2 = _prompt_pixel(bx2, what)
++            y2 = _prompt_pixel(by2, what)
++            if not (0 <= x1 <= x2 < w and 0 <= y1 <= y2 < h):
++                raise ValueError(f"object {obj.id} box {(x1, y1, x2, y2)} outside {w}x{h}")
++            chunk.append(f"<|box;x1={x1};y1={y1};x2={x2};y2={y2};w={w};h={h}|>")
++        for point in obj.points:
++            what = f"object {obj.id} point"
++            x = _prompt_pixel(point.x, what)
++            y = _prompt_pixel(point.y, what)
++            if not (0 <= x < w and 0 <= y < h):
++                raise ValueError(f"object {obj.id} point {(x, y)} outside {w}x{h}")
++            if not point.positive:
++                chunk.append("-")
++            chunk.append(f"<|point;x={x};y={y};w={w};h={h}|>")
++        rendered.append("".join(chunk))
++    return "<0f>" + ",".join(rendered)
++
++
++def grid_box_to_pixels(
++    box: tuple[float, float, float, float], size: tuple[int, int]
++) -> tuple[int, int, int, int]:
++    """A Muse Spark box in the 0 to 1000 grid as an inclusive pixel box of the image sent.
++
++    Spec: tests/test_sam_prompts.py.
++    """
++    w, h = _prompt_image_size(size)
++    try:
++        gx1, gy1, gx2, gy2 = box
++    except (TypeError, ValueError):
++        raise ValueError(f"grid box must be (x1, y1, x2, y2), got {box!r}") from None
++    x1 = _grid_pixel(gx1, w)
++    y1 = _grid_pixel(gy1, h)
++    x2 = _grid_pixel(gx2, w)
++    y2 = _grid_pixel(gy2, h)
++    # A backwards box is put in order, so the result is always a valid prompt.
++    return (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
++
++
+ def _output_text(response: dict) -> str:
+@@ -67,4 +288,93 @@ def _output_text(response: dict) -> str:
+ 
++class TransientAPIError(RuntimeError):
++    """A failure worth retrying: timeout, rate limit or server error."""
++
++
++def sam_cache_key(image_png: bytes, prompt: str) -> str:
++    h = hashlib.sha256()
++    for part in (SAM_MODEL_ID.encode(), b"\0", prompt.encode(), b"\0", image_png):
++        h.update(part)
++    return h.hexdigest()
++
++
++class UsageLog:
++    """Every request to Meta Model API and every answer read from the cache instead.
++
++    One JSON line each in ``<cache_dir>/usage.jsonl`` (the cache volume in
++    production), read by the credit watch (GET /api/ops/usage). Only the model,
++    the status, the seconds and the tokens: never a prompt, an image or the key.
++    """
++
++    def __init__(self, path: Path) -> None:
++        self.path = Path(path)
++        self._lock = threading.Lock()
++
++    def add(self, model: str, **fields) -> None:
++        entry = {"at": round(time.time(), 1), "model": model, **fields}
++        with self._lock:
++            self.path.parent.mkdir(parents=True, exist_ok=True)
++            with self.path.open("a", encoding="utf-8") as f:
++                f.write(json.dumps(entry) + "\n")
++
++    def entries(self) -> list[dict]:
++        if not self.path.exists():
++            return []
++        with self._lock:
++            lines = self.path.read_text(encoding="utf-8").splitlines()
++        out = []
++        for line in lines:
++            try:
++                out.append(json.loads(line))
++            except json.JSONDecodeError:  # a line cut by a crash: skip it
++                continue
++        return out
++
++
++def usage_summary(entries: list[dict], now: float | None = None) -> dict:
++    """Calls, cache hits, errors, tokens and seconds per model, last hour / 24 h / all."""
++    now = time.time() if now is None else now
++    windows = {"hour": 3600, "day": 86400, "all": float("inf")}
++    out: dict = {}
++    for name, span in windows.items():
++        models: dict = {}
++        for e in entries:
++            if now - e["at"] > span:
++                continue
++            m = models.setdefault(e["model"], {"calls": 0, "cached": 0, "errors": 0,
++                                               "rate_limited": 0, "input_tokens": 0,
++                                               "output_tokens": 0, "seconds": 0.0})  # fmt: skip
++            if e.get("cached"):
++                m["cached"] += 1
++                continue
++            m["calls"] += 1
++            status = e.get("status", 200)
++            m["errors"] += status >= 400
++            m["rate_limited"] += status == 429
++            m["input_tokens"] += e.get("input_tokens") or 0
++            m["output_tokens"] += e.get("output_tokens") or 0
++            m["seconds"] = round(m["seconds"] + (e.get("seconds") or 0), 1)
++        out[name] = models
++    return out
++
++
++def _request_model(request: httpx.Request) -> str:
++    if request.url.path.endswith(TRANSCRIBE_PATH):
++        return VOICE_MODEL_ID
++    try:
++        return json.loads(request.content).get("model", "unknown")
++    except (ValueError, AttributeError):
++        return "unknown"
++
++
+ class MetaClient:
+-    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
++    def __init__(
++        self,
++        api_key: str | None = None,
++        base_url: str | None = None,
++        cache_dir: Path | None = DEFAULT_CACHE_DIR,
++        max_retries: int = 4,
++        backoff_s: float = 2.0,
++        transport: httpx.BaseTransport | None = None,
++        sleep: Callable[[float], None] = time.sleep,
++    ) -> None:
+         load_dotenv()
+@@ -72,4 +382,9 @@ class MetaClient:
+         self.base_url = (base_url or os.getenv("META_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
++        self.cache_dir = cache_dir
++        self.max_retries = max_retries
++        self.backoff_s = backoff_s
++        self._sleep = sleep
+         if not self.api_key:
+             raise RuntimeError("META_API_KEY must be set in .env")
++        self.usage = UsageLog(Path(cache_dir) / "usage.jsonl") if cache_dir else None
+         self._http = httpx.Client(
+@@ -78,9 +393,45 @@ class MetaClient:
+             timeout=180,
++            transport=transport,
++            event_hooks={"request": [self._started], "response": [self._answered]},
+         )
+ 
+-    def segment_row(self, image_png: bytes, prompt: str) -> list[dict]:
+-        """SAM 3.1: one record per object matching a short noun-phrase prompt.
++    def _started(self, request: httpx.Request) -> None:
++        request.extensions["coresight_t0"] = time.perf_counter()
+ 
+-        Day 4 adds caching by image hash and retries.
+-        """
++    def _answered(self, response: httpx.Response) -> None:
++        """The credit watch: one line per request that reached the API."""
++        if self.usage is None:
++            return
++        request = response.request
++        model = _request_model(request)
++        tokens: dict = {}
++        if model != SAM_MODEL_ID and response.status_code < 400:  # SAM streams: no body yet
++            response.read()
++            try:
++                usage = response.json().get("usage") or {}
++                tokens = {k: usage.get(k) for k in ("input_tokens", "output_tokens")}
++            except (ValueError, AttributeError):
++                pass
++        t0 = request.extensions.get("coresight_t0")
++        seconds = round(time.perf_counter() - t0, 2) if t0 else None
++        self.usage.add(model, status=response.status_code, seconds=seconds, **tokens)
++
++    def cache_hit(self, model: str) -> None:
++        """An answer read from the cache instead of the API (also SAM's decoded masks)."""
++        if self.usage is not None:
++            self.usage.add(model, cached=True)
++
++    def _with_retries(self, call: Callable[[], str]) -> str:
++        """Run ``call``; on a transient failure wait backoff_s * 2**attempt and retry."""
++        for attempt in range(self.max_retries + 1):
++            try:
++                return call()
++            except (TransientAPIError, httpx.TimeoutException, httpx.TransportError):
++                if attempt == self.max_retries:
++                    raise
++                self._sleep(self.backoff_s * 2**attempt)
++        raise AssertionError("unreachable")
++
++    def segment_row(self, image_png: bytes, prompt: str) -> list[dict]:
++        """SAM 3.1: one record per object matching a short noun-phrase prompt."""
+         return parse_sam_text(self.segment_row_raw(image_png, prompt))
+@@ -88,3 +439,17 @@ class MetaClient:
+     def segment_row_raw(self, image_png: bytes, prompt: str) -> str:
+-        """SAM 3.1 raw output text, streamed as the docs recommend."""
++        """SAM 3.1 raw output text: from the cache, or from the API and then cached."""
++        path = None
++        if self.cache_dir is not None:
++            path = Path(self.cache_dir) / "sam" / f"{sam_cache_key(image_png, prompt)}.txt"
++            if path.exists():
++                self.cache_hit(SAM_MODEL_ID)
++                return path.read_text(encoding="utf-8")
++        text = self._with_retries(lambda: self._sam_request(image_png, prompt))
++        if path is not None:
++            path.parent.mkdir(parents=True, exist_ok=True)
++            path.write_text(text, encoding="utf-8")
++        return text
++
++    def _sam_request(self, image_png: bytes, prompt: str) -> str:
++        """One streamed SAM 3.1 call, as the docs recommend."""
+         body = {
+@@ -107,3 +472,4 @@ class MetaClient:
+                 resp.read()
+-                raise RuntimeError(f"SAM {resp.status_code}: {resp.text}")
++                error = TransientAPIError if resp.status_code in RETRY_STATUS else RuntimeError
++                raise error(f"SAM {resp.status_code}: {resp.text}")
+             for line in resp.iter_lines():
+@@ -119,14 +485,11 @@ class MetaClient:
+ 
++    model = MUSE_SPARK_MODEL_ID  # the describe backend (describe.Describer)
++
+     def describe_interval(self, image_png: bytes, context: dict) -> GeologyDescription:
+-        """Muse Spark: lithology, alteration, mineralization and anomalies.
++        """Muse Spark: lithology, alteration, mineralization and visible anomalies.
+ 
+-        The raw response is validated with GeologyDescription before returning.
+-        Day 6: prompt tuning and anomaly rules.
++        The answer is constrained to ModelDescription (json_schema), validated
++        and cached; rule anomalies are added later by coresight.anomalies.
+         """
+-        prompt = (
+-            "You are a core logging geologist. Describe the drill core in this photo. "
+-            "Return lithology, alteration, mineralization, anomalies (only these types: "
+-            "low_recovery, intense_fracturing, visible_sulfides, other) and your confidence "
+-            "from 0 to 1. Do not compute RQD. Context: " + json.dumps(context)
+-        )
++        prompt = describe_prompt(context)
+         body = {
+@@ -147,3 +510,3 @@ class MetaClient:
+                     "name": "GeologyDescription",
+-                    "schema": GeologyDescription.model_json_schema(),
++                    "schema": ModelDescription.model_json_schema(),
+                 }
+@@ -151,5 +514,170 @@ class MetaClient:
+         }
+-        resp = self._http.post(RESPONSES_PATH, json=body)
+-        if resp.status_code >= 400:
+-            raise RuntimeError(f"Muse Spark {resp.status_code}: {resp.text}")
+-        return GeologyDescription.model_validate_json(_output_text(resp.json()))
++
++        def call() -> str:
++            resp = self._http.post(RESPONSES_PATH, json=body)
++            if resp.status_code >= 400:
++                error = TransientAPIError if resp.status_code in RETRY_STATUS else RuntimeError
++                raise error(f"Muse Spark {resp.status_code}: {resp.text}")
++            return _output_text(resp.json())
++
++        fetched = []
++
++        def fetch() -> str:
++            fetched.append(True)
++            return self._with_retries(call)
++
++        description = cached_description(self.cache_dir, self.model, prompt, image_png, fetch)
++        if not fetched:
++            self.cache_hit(MUSE_SPARK_MODEL_ID)
++        return description
++
++    def check_tray(self, image_png: bytes) -> TrayCheck:
++        """Muse Spark on the whole photo: is it a core tray at all? (the input gate).
++
++        Same request as describe_interval with the TrayCheck schema; the answer
++        is validated and cached by a hash of model, prompt and image.
++        """
++        name = hashlib.sha256(
++            b"\0".join([MUSE_SPARK_MODEL_ID.encode(), TRAY_CHECK_PROMPT.encode(), image_png])
++        ).hexdigest()
++        path = self.cache_dir / "tray_check" / f"{name}.json" if self.cache_dir else None
++        if path and path.exists():
++            self.cache_hit(MUSE_SPARK_MODEL_ID)
++            return TrayCheck.model_validate_json(path.read_text(encoding="utf-8"))
++        body = {
++            "model": MUSE_SPARK_MODEL_ID,
++            "input": [
++                {
++                    "type": "message",
++                    "role": "user",
++                    "content": [
++                        {"type": "input_text", "text": TRAY_CHECK_PROMPT},
++                        {"type": "input_image", "image_url": _data_url(image_png)},
++                    ],
++                }
++            ],
++            "text": {
++                "format": {
++                    "type": "json_schema",
++                    "name": "TrayCheck",
++                    "schema": TrayCheck.model_json_schema(),
++                }
++            },
++        }
++
++        def call() -> str:
++            resp = self._http.post(RESPONSES_PATH, json=body)
++            if resp.status_code >= 400:
++                error = TransientAPIError if resp.status_code in RETRY_STATUS else RuntimeError
++                raise error(f"Muse Spark {resp.status_code}: {resp.text}")
++            return _output_text(resp.json())
++
++        check = TrayCheck.model_validate_json(self._with_retries(call))
++        if path:
++            path.parent.mkdir(parents=True, exist_ok=True)
++            path.write_text(check.model_dump_json(indent=1), encoding="utf-8")
++        return check
++
++    def locate_row(self, image_png: bytes) -> RowLocation:
++        """Muse Spark localizes the core pieces of one row and what is not core (point B).
++
++        Grounding with structured output, as the docs recommend: the boxes come back
++        as schemas.RowLocation (0 to 1000 grid of the image sent), validated and
++        cached by a hash of model, prompt and image.
++        """
++        name = hashlib.sha256(
++            b"\0".join([MUSE_SPARK_MODEL_ID.encode(), LOCATE_PROMPT.encode(), image_png])
++        ).hexdigest()
++        path = self.cache_dir / "locate" / f"{name}.json" if self.cache_dir else None
++        if path and path.exists():
++            self.cache_hit(MUSE_SPARK_MODEL_ID)
++            return RowLocation.model_validate_json(path.read_text(encoding="utf-8"))
++        body = {
++            "model": MUSE_SPARK_MODEL_ID,
++            "input": [
++                {
++                    "type": "message",
++                    "role": "user",
++                    "content": [
++                        {"type": "input_text", "text": LOCATE_PROMPT},
++                        {"type": "input_image", "image_url": _data_url(image_png)},
++                    ],
++                }
++            ],
++            "text": {
++                "format": {
++                    "type": "json_schema",
++                    "name": "RowLocation",
++                    "schema": RowLocation.model_json_schema(),
++                }
++            },
++        }
++
++        def call() -> str:
++            resp = self._http.post(RESPONSES_PATH, json=body)
++            if resp.status_code >= 400:
++                error = TransientAPIError if resp.status_code in RETRY_STATUS else RuntimeError
++                raise error(f"Muse Spark {resp.status_code}: {resp.text}")
++            return _output_text(resp.json())
++
++        location = RowLocation.model_validate_json(self._with_retries(call))
++        if path:
++            path.parent.mkdir(parents=True, exist_ok=True)
++            path.write_text(location.model_dump_json(indent=1), encoding="utf-8")
++        return location
++
++    def respond(self, body: dict) -> dict:
++        """One Responses API turn with function tools (the area agents).
++
++        The agents send the whole conversation every turn (no
++        previous_response_id), so the same box asks the same questions and the
++        answers are cached by a hash of the request: a sample box is paid once.
++        """
++        key = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
++        path = self.cache_dir / "responses" / f"{key}.json" if self.cache_dir else None
++        if path and path.exists():
++            self.cache_hit(body.get("model", "unknown"))
++            return json.loads(path.read_text(encoding="utf-8"))
++
++        def call() -> str:
++            resp = self._http.post(RESPONSES_PATH, json=body)
++            if resp.status_code >= 400:
++                error = TransientAPIError if resp.status_code in RETRY_STATUS else RuntimeError
++                raise error(f"{body.get('model')} {resp.status_code}: {resp.text}")
++            return resp.text
++
++        text = self._with_retries(call)
++        if path:
++            path.parent.mkdir(parents=True, exist_ok=True)
++            path.write_text(text, encoding="utf-8")
++        return json.loads(text)
++
++    def transcribe(self, wav: bytes, keywords: list[str] | None = None) -> Transcript:
++        """Muse Voice Transcribe: one push-to-talk clip (mono 16-bit PCM WAV) to text.
++
++        Not cached: every dictation is new. 429 and 5xx are retried.
++        """
++        request = {
++            "model": VOICE_MODEL_ID,
++            "audioEncoding": "WAV",
++            "mode": "PUSH_TO_TALK",
++            "languageBias": VOICE_LANGUAGES,
++        }
++        if keywords:
++            request["keywords"] = keywords
++
++        def call() -> str:
++            resp = self._http.post(
++                TRANSCRIBE_PATH,
++                headers={"Accept": "application/json"},
++                files={
++                    "request": (None, json.dumps(request), "application/json"),
++                    "audio": ("dictation.wav", wav, "audio/wav"),
++                },
++            )
++            if resp.status_code >= 400:
++                error = TransientAPIError if resp.status_code in RETRY_STATUS else RuntimeError
++                raise error(f"Muse Voice Transcribe {resp.status_code}: {resp.text}")
++            return resp.text
++
++        return Transcript.model_validate_json(self._with_retries(call))
+diff --git a/src/coresight/pipeline.py b/src/coresight/pipeline.py
+index a70c5ec..af24dab 100644
+--- a/src/coresight/pipeline.py
++++ b/src/coresight/pipeline.py
+@@ -2,3 +2,7 @@
+ 
+-Each stage is a stub until its day in docs/PLAN.md.
++``log_box`` runs photo -> calibrate -> segment -> runs -> geometry.py and
++returns validated IntervalResult rows; ``describe`` adds one validated
++description per run (Muse Spark or Glimmer, same contract). The review of a
++box (corrections, approval) lives in coresight.review; ``export_csv`` writes
++the reviewed log.
+ """
+@@ -7,50 +11,240 @@ from __future__ import annotations
+ 
++import csv
++import io
++from collections.abc import Callable
++from concurrent.futures import ThreadPoolExecutor
+ from pathlib import Path
+ 
+-
+-def calibrate(image_path: Path):
+-    """Detect box edges and scale markers, return px->cm scale and row crops.
+-
+-    Day 3. Done when the px->cm error is below 2% on the labelled boxes.
++import cv2
++import numpy as np
++
++from coresight.anomalies import with_rule_anomalies
++from coresight.calibration import Tray, find_trays
++from coresight.crops import run_crops
++from coresight.describe import Describer, png_bytes
++from coresight.meta_client import MetaClient
++from coresight.runs import Position, assign_runs, to_result
++from coresight.schemas import (
++    BoxReview,
++    GeologyDescription,
++    Interval,
++    IntervalDescription,
++    IntervalResult,
++)
++from coresight.segmentation import (
++    FALLBACK,
++    SPARK,
++    RowPieces,
++    located_masks,
++    row_masks,
++    run_markers,
++    segment_row,
++)
++
++
++def calibrate(image_path: Path, box_length_cm: float, n_rows: int = 5) -> list[Tray]:
++    """Find the trays in a photo: straightened geometry, px->cm along the rows, rows.
++
++    ``box_length_cm`` is the site's tray length (see coresight.calibration).
++    Checked by scripts/eval_calibration.py (error < 2% on the labelled boxes).
+     """
+-    raise NotImplementedError("day 3: calibration")
++    image = cv2.imread(str(image_path))
++    if image is None:
++        raise FileNotFoundError(image_path)
++    return find_trays(image, box_length_cm, n_rows=n_rows)
+ 
+ 
+-def segment(rows):
+-    """Run SAM 3.1 on each row and convert masks to Piece objects in cm.
++def segment(
++    image: np.ndarray, tray: Tray, client: MetaClient, method: str = "sam+fill+profile"
++) -> tuple[list[RowPieces], list[Position]]:
++    """Pieces of every row of a tray (SAM 3.1 + rules) and the run markers found.
+ 
+-    Day 4. Fallback for thin fractures: intensity profile along the core axis.
++    A ``spark+`` method prompts SAM with Muse Spark's boxes instead of "stone";
++    a ``fallback+`` method does so only for a row where "stone" finds nothing.
+     """
+-    raise NotImplementedError("day 4: segmentation")
+-
+-
+-def build_logs(pieces_by_run, runs):
+-    """Call geometry.log_interval for each run (RQD/TCR/FF per interval).
+-
+-    Day 5.
++    rows, markers = [], []
++    for i, crop in enumerate(tray.row_crops(image)):
++        masks, not_core, _ = row_prompts(client, crop, method)
++        rows.append(segment_row(crop, masks, tray.px_per_cm, method, not_core))
++        markers += [Position(i, x / tray.px_per_cm) for x in run_markers(crop, tray.px_per_cm)]
++    return rows, markers
++
++
++def row_prompts(
++    client: MetaClient, crop: np.ndarray, method: str
++) -> tuple[list[dict], list[tuple[float, float]], bool]:
++    """SAM masks of one row for ``method``, the x spans that are not core, and whether
++    Muse Spark localized the row (``spark+`` always, ``fallback+`` when "stone" found nothing)."""
++    masks = [] if method.startswith(SPARK) else row_masks(client, crop)
++    if method.startswith(SPARK) or (method.startswith(FALLBACK) and not masks):
++        return *located_masks(client, crop), True
++    return masks, [], False
++
++
++def rows_prompts(
++    client: MetaClient,
++    crops: list[np.ndarray],
++    method: str,
++    spark_rows: Callable[[list[int]], None] = lambda rows: None,
++) -> list[tuple[list[dict], list[tuple[float, float]], bool]]:
++    """``row_prompts`` for every row at once: SAM reads all the rows side by side, then
++    Muse Spark boxes, side by side, the rows that need it. ``spark_rows`` hears which
++    rows those are before Spark starts (the page says so: it is the slow part)."""
++    with ThreadPoolExecutor(max_workers=max(len(crops), 1)) as pool:
++        stone = list(pool.map(
++            lambda c: [] if method.startswith(SPARK) else row_masks(client, c), crops))
++        need = [i for i, m in enumerate(stone) if method.startswith(SPARK)
++                or (method.startswith(FALLBACK) and not m)]  # fmt: skip
++        if need:
++            spark_rows(need)
++        located = dict(zip(need, pool.map(lambda i: located_masks(client, crops[i]), need),
++                           strict=True))  # fmt: skip
++    return [(*located[i], True) if i in located else (m, [], False) for i, m in enumerate(stone)]
++
++
++def build_logs(
++    rows: list[RowPieces],
++    markers: list[Position],
++    runs: list[Interval],
++    first_starts_in_box: bool,
++) -> list[IntervalResult]:
++    """RQD, TCR and fracture frequency per run, all from geometry.log_interval."""
++    return [to_result(*r) for r in assign_runs(rows, markers, runs, first_starts_in_box)]
++
++
++def log_box(
++    image_path: Path,
++    box_length_cm: float,
++    runs: list[Interval],
++    client: MetaClient,
++    first_starts_in_box: bool,
++    tray_index: int = 0,
++    markers: list[Position] | None = None,
++    method: str = "sam+fill+profile",
++) -> list[IntervalResult]:
++    """One photo end to end. ``markers`` overrides the detected run markers
++    (for boxes whose run blocks are not the magenta foam the detector knows)."""
++    image = cv2.imread(str(image_path))
++    if image is None:
++        raise FileNotFoundError(image_path)
++    tray = find_trays(image, box_length_cm, max_trays=tray_index + 1)[tray_index]
++    rows, found = segment(image, tray, client, method)
++    return build_logs(rows, found if markers is None else markers, runs, first_starts_in_box)
++
++
++def detect_markers(image: np.ndarray, tray: Tray) -> list[Position]:
++    """Run markers (magenta foam blocks) of a tray, without calling SAM."""
++    return [
++        Position(i, x / tray.px_per_cm)
++        for i, crop in enumerate(tray.row_crops(image))
++        for x in run_markers(crop, tray.px_per_cm)
++    ]
++
++
++def describe_runs(
++    image: np.ndarray,
++    tray: Tray,
++    markers: list[Position],
++    logs: list[IntervalResult],
++    describer: Describer,
++    context: dict | None = None,
++) -> list[IntervalDescription]:
++    """One description per run: the run's crop to the backend, then the rule anomalies.
++
++    ``logs`` come from build_logs with the same markers, so crop i is run i.
+     """
+-    raise NotImplementedError("day 5: geometry wiring")
+-
+-
+-def describe(image_path: Path, logs):
+-    """Attach Muse Spark descriptions and anomaly flags to each interval.
+-
+-    Day 6.
++    out = []
++    for log, crop in zip(logs, run_crops(image, tray, markers, len(logs)), strict=True):
++        ctx = {**(context or {}), "from_m": log.from_m, "to_m": log.to_m}
++        description = describer.describe_interval(png_bytes(crop), ctx)
++        out.append(
++            IntervalDescription(
++                from_m=log.from_m,
++                to_m=log.to_m,
++                backend=describer.model,
++                description=with_rule_anomalies(description, log),
++            )
++        )
++    return out
++
++
++def describe(
++    image_path: Path,
++    logs: list[IntervalResult],
++    describer: Describer,
++    box_length_cm: float,
++    tray_index: int = 0,
++    markers: list[Position] | None = None,
++    context: dict | None = None,
++) -> list[IntervalDescription]:
++    """Descriptions and anomaly flags for the runs of one photo (Muse Spark or Glimmer).
++
++    Lithology, alteration, mineralization and visible sulfides come from the
++    model; low recovery and intense fracturing from the logs (geometry.py).
++    ``markers`` overrides the detected run markers, as in log_box.
+     """
+-    raise NotImplementedError("day 6: descriptions")
++    image = cv2.imread(str(image_path))
++    if image is None:
++        raise FileNotFoundError(image_path)
++    tray = find_trays(image, box_length_cm, max_trays=tray_index + 1)[tray_index]
++    if markers is None:
++        markers = detect_markers(image, tray)
++    return describe_runs(image, tray, markers, logs, describer, context)
+ 
+ 
+-def export_csv(logs, out_path: Path) -> Path:
+-    """Write the approved log to CSV for geological modelling software.
++def describe_photo(image_path: Path, describer: Describer, context: dict) -> GeologyDescription:
++    """A close-up with no tray to measure: the whole photo, no rule anomalies."""
++    image = cv2.imread(str(image_path))
++    if image is None:
++        raise FileNotFoundError(image_path)
++    return describer.describe_interval(png_bytes(image), context)
+ 
+-    Day 7.
+-    """
+-    raise NotImplementedError("day 7: review UI and CSV export")
+ 
++CSV_COLUMNS = [
++    "hole_id", "box", "from_m", "to_m", "complete", "rqd_pct", "tcr_pct", "natural_fractures",
++    "fracture_frequency_per_m", "rock_quality", "uncertain_breaks", "mechanical_breaks",
++    "lithology", "alteration", "mineralization", "anomalies", "comment", "corrections",
++    "description_backend", "status",
++]  # fmt: skip
+ 
+-def draft_handoffs(approved_logs):
+-    """Draft the assay request (lab) and ground-condition alert (safety).
+ 
+-    Drafts only. Nothing is sent without human approval. Day 8.
++def export_csv(box: BoxReview) -> str:
++    """The reviewed log of one box as CSV for geological modelling software.
++
++    One row per run; numbers are the corrected ones (geometry.py), and
++    ``corrections`` counts the geologist's changes to that run.
++    """
++    out = io.StringIO()
++    writer = csv.DictWriter(out, fieldnames=CSV_COLUMNS, lineterminator="\n")
++    writer.writeheader()
++    for run in box.runs:
++        d = run.description
++        writer.writerow(
++            {
++                "hole_id": box.hole_id,
++                "box": box.box_number,
++                **run.log.model_dump(include=set(CSV_COLUMNS)),
++                "lithology": d.lithology if d else "",
++                "alteration": d.alteration if d else "",
++                "mineralization": d.mineralization if d else "",
++                "anomalies": "; ".join(f"{a.type}: {a.explanation}" for a in d.anomalies)
++                if d
++                else "",
++                "comment": run.comment,
++                "corrections": len(run.corrections),
++                "description_backend": run.description_backend or "",
++                "status": box.status,
++            }
++        )
++    return out.getvalue()
++
++
++def draft_handoffs(box: BoxReview, history: list[BoxReview]):
++    """Stage 6: the orchestrator and area agents on an approved box (coresight.agents).
++
++    Drafts only, each checked by verify.py. Nothing is sent without human approval.
+     """
+-    raise NotImplementedError("day 8: handoffs")
++    from coresight import agents
++    from coresight.verify import verify
++
++    return agents.draft_handoffs(box, history, MetaClient(), verify)
+diff --git a/src/coresight/schemas.py b/src/coresight/schemas.py
+index fd1a227..7b16b72 100644
+--- a/src/coresight/schemas.py
++++ b/src/coresight/schemas.py
+@@ -8,3 +8,5 @@ from __future__ import annotations
+ 
++from datetime import datetime
+ from enum import StrEnum
++from typing import Literal
+ 
+@@ -24,2 +26,7 @@ class AnomalyType(StrEnum):
+ 
++class AnomalySource(StrEnum):
++    RULE = "rule"  # from geometry.py numbers (coresight.anomalies)
++    MODEL = "model"  # seen by the vision model
++
++
+ class Anomaly(_Strict):
+@@ -27,2 +34,3 @@ class Anomaly(_Strict):
+     explanation: str = Field(min_length=1)
++    source: AnomalySource = AnomalySource.MODEL
+ 
+@@ -30,3 +38,3 @@ class Anomaly(_Strict):
+ class GeologyDescription(_Strict):
+-    """What Muse Spark writes for one interval (day 6)."""
++    """Description of one interval: what the model saw plus the rule-based anomalies."""
+ 
+@@ -39,2 +47,30 @@ class GeologyDescription(_Strict):
+ 
++class ModelAnomaly(_Strict):
++    # low_recovery and intense_fracturing are measured, never guessed by a model
++    type: Literal["visible_sulfides", "other"]
++    explanation: str = Field(min_length=1)
++
++
++class ModelDescription(_Strict):
++    """What a describe backend (Muse Spark or Glimmer) must return, as JSON schema."""
++
++    lithology: str = Field(min_length=1)
++    alteration: str
++    mineralization: str
++    anomalies: list[ModelAnomaly] = Field(default_factory=list)
++    confidence: float = Field(ge=0, le=1)
++
++    def to_geology(self) -> GeologyDescription:
++        return GeologyDescription(
++            lithology=self.lithology,
++            alteration=self.alteration,
++            mineralization=self.mineralization,
++            anomalies=[
++                Anomaly(type=a.type, explanation=a.explanation, source=AnomalySource.MODEL)
++                for a in self.anomalies
++            ],
++            confidence=self.confidence,
++        )
++
++
+ class Interval(_Strict):
+@@ -53,2 +89,11 @@ class LabelRun(Interval):
+ 
++    rqd_pct: float = Field(ge=0, le=100)
++    tcr_pct: float = Field(ge=0, le=100)
++    # None: the source did not log fractures (e.g. RQD and CR read from a box lid).
++    natural_fractures: int | None = Field(default=None, ge=0)
++
++
++class IntervalResult(Interval):
++    """What the pipeline reports for one run, every number from geometry.py."""
++
+     rqd_pct: float = Field(ge=0, le=100)
+@@ -56,2 +101,7 @@ class LabelRun(Interval):
+     natural_fractures: int = Field(ge=0)
++    fracture_frequency_per_m: float = Field(ge=0)
++    uncertain_breaks: int = Field(ge=0)  # counted as natural, flagged for the geologist
++    mechanical_breaks: int = Field(ge=0)  # rejoined: the core was intact in situ
++    rock_quality: Literal["very poor", "poor", "fair", "good", "excellent"]
++    complete: bool  # the whole run is in this photo (else it continues in another box)
+ 
+@@ -63 +113,486 @@ class BoxLabel(_Strict):
+     runs: list[LabelRun] = Field(min_length=1)
++
++
++class IntervalDescription(Interval):
++    """One run's description, as pipeline.describe returns it."""
++
++    backend: str = Field(min_length=1)  # model that wrote it, e.g. muse-spark-1.3
++    description: GeologyDescription
++
++
++class Transcript(BaseModel):
++    """Muse Voice Transcribe buffered JSON answer (docs: voice/schemas, Transcribe Response)."""
++
++    sessionId: str  # field names as the API sends them
++    transcript: str
++    audioDurationMs: int = Field(ge=0)
++    turns: list[dict] = Field(default_factory=list)
++
++
++# Input gate: is this photo a core tray CoreSight can measure?
++
++GateSignal = Literal["spark", "calibration", "segmentation"]
++
++
++class TrayCheck(_Strict):
++    """Muse Spark's answer for the whole photo: is it a core tray at all?"""
++
++    is_core_tray: bool
++    what_it_shows: str = Field(min_length=1, max_length=120)  # a few words
++    confidence: float = Field(ge=0, le=1)
++
++
++class GateReason(_Strict):
++    """One signal that says the photo should not be measured, or that a person must check it."""
++
++    signal: GateSignal
++    value: float  # the confidence that failed
++    detail: str = Field(min_length=1)
++
++
++class GateResult(_Strict):
++    """gate.check_input: measure the photo (ok) or refuse it with reasons."""
++
++    ok: bool
++    reasons: list[GateReason] = Field(default_factory=list)
++    message: str = ""  # what the person reads; empty when ok
++    # ok but unsure (calibration between gate.MIN_CALIBRATION and gate.SURE_CALIBRATION):
++    # the page shows the rows found and no number until a person says they are right
++    doubts: list[GateReason] = Field(default_factory=list)
++
++
++# Localization (point B): Muse Spark marks what is core in a row, SAM 3.1 cuts it.
++
++# empty (point 5): a stretch with no core (bare wood, an empty compartment): not recovered
++LocatedKind = Literal["core", "run_block", "card", "waxed_sample", "other", "empty"]
++
++
++class LocatedObject(_Strict):
++    """One thing Muse Spark found in a row crop, as a box in its 0 to 1000 grid.
++
++    (0, 0) is the top left of the crop and (1000, 1000) its bottom right; the
++    model may answer slightly out of range, so a little slack is allowed and
++    meta_client.grid_box_to_pixels clamps.
++    """
++
++    kind: LocatedKind
++    x_min: int = Field(ge=-50, le=1050)
++    y_min: int = Field(ge=-50, le=1050)
++    x_max: int = Field(ge=-50, le=1050)
++    y_max: int = Field(ge=-50, le=1050)
++
++
++class RowLocation(_Strict):
++    """Muse Spark's answer for one row: every core piece and everything that is not core."""
++
++    objects: list[LocatedObject] = Field(max_length=80)
++
++
++# Review (day 7): what the geologist sees, corrects and approves.
++
++BreakKind = Literal["natural", "uncertain", "possible_mechanical", "mechanical"]
++DescriptionField = Literal["lithology", "alteration", "mineralization", "comment"]
++
++
++class ReviewPiece(_Strict):
++    """One piece of a run as laid in the photo: row of the tray and cm from the row start."""
++
++    row: int = Field(ge=0)
++    start_cm: float
++    end_cm: float
++    break_after: BreakKind
++
++    @model_validator(mode="after")
++    def _ordered(self) -> ReviewPiece:
++        if self.end_cm <= self.start_cm:
++            raise ValueError("end_cm must be greater than start_cm")
++        return self
++
++
++class Correction(_Strict):
++    """One change by the geologist, with the value it replaced (kept for evaluation)."""
++
++    at: datetime
++    target: str  # "break 3", "piece 2" or a description field
++    original: str
++    corrected: str
++    source: Literal["typed", "voice", "sam-point"] = "typed"
++    transcript: str | None = None  # what Muse Voice Transcribe heard, before any edit
++    # sam-point: the run's pieces before the click, so a refining click can replace it
++    pieces_before: list[ReviewPiece] | None = None
++
++
++class Measure(_Strict):
++    """The sums behind a run's RQD and TCR, from geometry.IntervalLog (shown as the working)."""
++
++    run_length_cm: float = Field(gt=0)
++    recovered_cm: float = Field(ge=0)
++    rqd_cm: float = Field(ge=0)
++    intact_lengths_cm: list[float]  # after mechanical breaks are rejoined
++
++
++class RunReview(Interval):
++    pieces: list[ReviewPiece]
++    measure: Measure | None = None  # of the current pieces
++    machine_log: IntervalResult  # as the pipeline produced it, never changed
++    log: IntervalResult  # recomputed by geometry.py after every piece correction
++    machine_description: GeologyDescription | None = None
++    description: GeologyDescription | None = None
++    description_backend: str | None = None
++    description_error: str | None = None
++    description_seconds: float | None = None
++    comment: str = ""
++    corrections: list[Correction] = Field(default_factory=list)
++
++
++class TrayView(_Strict):
++    """Straightened tray the overlay is drawn on."""
++
++    width: int = Field(gt=0)
++    height: int = Field(gt=0)
++    px_per_cm: float = Field(gt=0)
++    rows: list[tuple[float, float]]  # y1, y2 of every row
++    markers: list[tuple[int, float]]  # run markers: row, cm from the row start
++
++
++StageKey = Literal["calibration", "segmentation", "geometry", "description"]
++
++
++class Stage(_Strict):
++    """One step of the analysis, as the page shows it live and in the model ledger."""
++
++    key: StageKey
++    name: str  # what ran it, e.g. "SAM 3.1" or "geometry.py"
++    actor: Literal["model", "code"]
++    status: Literal["waiting", "working", "done", "failed"] = "waiting"
++    detail: str = ""
++    progress: float = Field(default=0, ge=0, le=1)
++    current: int | None = None  # row or run being processed (0-based)
++    seconds: float | None = None
++    calls: int = Field(default=0, ge=0)  # requests sent to the model
++    cached: int = Field(default=0, ge=0)  # answers read from data/cache instead
++    cost_usd: float | None = None  # None: not priced (free credits) or not a paid step
++
++
++class VoiceUsage(_Strict):
++    dictations: int = Field(default=0, ge=0)
++    audio_ms: int = Field(default=0, ge=0)
++    seconds: float = Field(default=0, ge=0)
++
++    @property
++    def cost_usd(self) -> float:  # Muse Voice Transcribe: $0.18 per hour of audio (docs)
++        return self.audio_ms / 3_600_000 * 0.18
++
++
++def default_stages() -> list[Stage]:
++    return [
++        Stage(key="calibration", name="OpenCV", actor="code"),
++        Stage(key="segmentation", name="SAM 3.1", actor="model"),
++        Stage(key="geometry", name="geometry.py", actor="code"),
++        Stage(key="description", name="Muse Spark 1.3", actor="model"),
++    ]
++
++
++AreaKey = Literal["lab", "safety", "plant", "finance"]
++
++# --- Hole agent and two-layer verification (point E) ---------------------------
++
++TrendKind = Literal["rqd_drop", "weak_zone", "lithology_change", "sulfides_appear",
++                    "sulfides_gone"]  # fmt: skip
++HoleAction = Literal["oriented_core", "warn_geotech", "sample_contact", "none"]
++
++
++class HoleTrend(_Strict):
++    """A change along the hole found by code (hole.hole_trends); numbers from geometry.py."""
++
++    kind: TrendKind
++    from_m: float = Field(ge=0)
++    to_m: float = Field(ge=0)
++    boxes: list[int]
++    summary: str  # one sentence, numbers written as people read them
++    rqd_before_pct: float | None = None  # rqd_drop: the box above, all runs together
++    rqd_after_pct: float | None = None  # rqd_drop: this box
++    rqd_pct: float | None = None  # weak_zone: the zone together
++    min_rqd_pct: float | None = None  # weak_zone: its worst interval
++    before: str | None = None  # lithology or sulfides above
++    after: str | None = None  # lithology or sulfides in this box
++
++
++class RoutingSignals(_Strict):
++    """What code knows about an approved box before the orchestrator routes it."""
++
++    min_rqd_pct: float = Field(ge=0, le=100)  # worst run of the box
++    min_tcr_pct: float = Field(ge=0, le=100)
++    sulfides: bool  # the reviewed description shows sulfides
++    lab_evidence: bool  # any mineralization, alteration or veins described
++    earlier_boxes: int = Field(ge=0)  # approved boxes of the hole above this one
++    trends: list[HoleTrend] = Field(default_factory=list)
++
++
++class HoleFinding(_Strict):
++    """What the hole agent submits: the trends it confirms and one proposed action."""
++
++    title: str = Field(min_length=1)
++    body: str = Field(min_length=1)
++    trends: list[TrendKind] = Field(default_factory=list)  # kinds hole_trends returned
++    action: HoleAction
++    action_reason: str = Field(min_length=1)
++
++
++class JudgedClaim(_Strict):
++    claim: str = Field(min_length=1)
++    supported: bool
++    evidence: str = Field(min_length=1)  # where the record backs it, or what is missing
++
++
++class JudgeVerdict(_Strict):
++    """Muse Spark as a judge: every text claim of a draft against the approved record."""
++
++    claims: list[JudgedClaim] = Field(min_length=1)
++
++    @property
++    def ok(self) -> bool:
++        return all(c.supported for c in self.claims)
++
++
++class AreaRoute(_Strict):
++    """The orchestrator's call for one area of the mine: does this box concern it, and why."""
++
++    area: AreaKey
++    applies: bool
++    reason: str = Field(min_length=1)
++    runs: list[int] = Field(default_factory=list)  # 0-based runs that triggered it
++
++
++class Routing(_Strict):
++    """What the orchestrator (Muse Wonder, plan B Muse Spark) submits for an approved box."""
++
++    routes: list[AreaRoute] = Field(min_length=1)
++
++    @model_validator(mode="after")
++    def _one_per_area(self) -> Routing:
++        areas = [r.area for r in self.routes]
++        if len(set(areas)) != len(areas):
++            raise ValueError("one route per area")
++        return self
++
++
++class DraftFigure(_Strict):
++    """A number the draft quotes, tied to the run and metric it comes from."""
++
++    # Run number, 1 is the first. ge=0 only so boxes saved before day 10 still load;
++    # verify.py refuses a run that does not exist.
++    run: int = Field(ge=0, description="Run number in this box; 1 is the first run")
++    metric: Literal["rqd_pct", "tcr_pct", "fracture_frequency_per_m", "natural_fractures"]
++    value: float
++
++
++class DraftLine(_Strict):
++    """A priced line (finance): a test code from the example table, how many samples."""
++
++    code: str = Field(min_length=1)
++    samples: int = Field(ge=1)
++    unit_usd: float = Field(ge=0)
++    total_usd: float = Field(ge=0)
++
++
++# What a draft may propose: a closed list (point 7). Nothing in it stops the operation;
++# people in charge decide that. verify.check_role refuses words that do.
++DraftAction = Literal["check_support", "scale_and_inspect", "review_before_next_run",
++                      "warn_geotech", "oriented_core", "sample_contact", "send_to_lab",
++                      "plant_test"]  # fmt: skip
++
++
++class Draft(_Strict):
++    """What an area agent submits. A draft only: nothing is sent."""
++
++    title: str = Field(min_length=1)
++    body: str = Field(min_length=1)
++    priority: Literal["low", "normal", "high"] = "normal"
++    actions: list[DraftAction] = Field(default_factory=list)  # proposed, from the list
++    intervals: list[Interval] = Field(default_factory=list)
++    figures: list[DraftFigure] = Field(default_factory=list)
++    lines: list[DraftLine] = Field(default_factory=list)
++    total_usd: float | None = None
++
++
++class Check(_Strict):
++    """One deterministic check of a draft (verify.py)."""
++
++    name: str
++    ok: bool
++    detail: str = ""
++
++
++class AgentEvent(_Strict):
++    """One line of the decision log shown in the UI."""
++
++    at: datetime
++    actor: str  # "orchestrator", an area, "verifier" or "geologist"
++    kind: Literal["model", "route", "tool", "draft", "check", "retry", "error", "approve",
++                  "finding", "judge", "escalate", "cost", "drop"]
++    text: str
++    model: str | None = None
++
++
++class Effort(_Strict):
++    """What a verified result cost: shown in the decision log as a sentence."""
++
++    attempts: int = 0  # submissions, at most three
++    turns: int = 0  # model turns, the judge's included
++    work_s: float = 0.0  # the agent writing
++    check_s: float = 0.0  # verify.py or the routing check
++    judge_s: float = 0.0  # Muse Spark as a judge
++
++
++class AreaDraft(_Strict):
++    area: AreaKey
++    model: str
++    draft: Draft | None = None
++    checks: list[Check] = Field(default_factory=list)
++    judge: JudgeVerdict | None = None  # only after every check passed
++    verified: bool = False
++    # needs_review: three attempts failed; the person sees why and decides
++    status: Literal["working", "ready", "rejected", "needs_review", "failed", "approved"] = (
++        "working"
++    )
++    escalation: str | None = None  # why it needs review
++    effort: Effort = Field(default_factory=Effort)
++    error: str | None = None
++    approved_at: datetime | None = None  # approved by a person; still not sent
++    approved_over_checks: bool = False  # the person approved it although it failed
++
++
++class HoleReport(_Strict):
++    """The hole agent's turn: code finds the trends, the agent reads them and proposes."""
++
++    model: str
++    trends: list[HoleTrend] = Field(default_factory=list)
++    finding: HoleFinding | None = None
++    checks: list[Check] = Field(default_factory=list)
++    judge: JudgeVerdict | None = None
++    verified: bool = False
++    status: Literal["working", "ready", "needs_review", "failed"] = "working"
++    escalation: str | None = None
++    effort: Effort = Field(default_factory=Effort)
++    error: str | None = None
++
++
++class Handoffs(_Strict):
++    status: Literal["working", "done", "failed"] = "working"
++    hole: HoleReport | None = None  # point E: the hole agent runs first
++    signals: RoutingSignals | None = None
++    orchestrator_model: str | None = None
++    routing: Routing | None = None
++    routing_checks: list[Check] = Field(default_factory=list)  # verify.check_routing
++    routing_verified: bool | None = None  # None: routed before point E
++    routing_effort: Effort = Field(default_factory=Effort)
++    escalation: str | None = None  # the routing failed three times: a person decides
++    drafts: list[AreaDraft] = Field(default_factory=list)
++    log: list[AgentEvent] = Field(default_factory=list)
++    error: str | None = None
++
++
++class BoxReview(_Strict):
++    id: str = Field(min_length=1)
++    hole_id: str = Field(min_length=1)
++    box_number: int = Field(ge=1)
++    source: str  # where the photo came from (sample name and license, or "upload")
++    status: Literal["processing", "ready", "failed", "approved"]
++    error: str | None = None
++    created_at: datetime
++    approved_at: datetime | None = None
++    tray: TrayView | None = None
++    runs: list[RunReview] = Field(default_factory=list)
++    stages: list[Stage] = Field(default_factory=default_stages)
++    mask_rows: list[int] = Field(default_factory=list)  # rows with a SAM mask image
++    voice: VoiceUsage = Field(default_factory=VoiceUsage)
++    handoffs: Handoffs | None = None  # area agents, after approval (day 8)
++    gate: GateResult | None = None  # the input gate's last verdict (day 10)
++    owner: str | None = None  # the browser that made it (api.VISITOR_COOKIE); None: nobody's
++    pinned: bool = False  # a read-only sample everybody sees (home, tour, public hole)
++    rows_confirmed: bool = False  # a person said the rows of an unsure calibration are right
++
++# --- Drill hole view (point D) ------------------------------------------------
++
++RockQuality = Literal["very poor", "poor", "fair", "good", "excellent"]
++
++
++class HoleBox(_Strict):
++    id: str
++    box_number: int = Field(ge=1)
++    from_m: float
++    to_m: float
++    status: Literal["processing", "ready", "failed", "approved"]
++    source: str
++    in_log: bool  # approved and used in the hole log
++
++
++class HoleIssue(_Strict):
++    kind: Literal["gap", "overlap"]
++    from_m: float
++    to_m: float
++    box_before: int
++    box_after: int
++
++
++class HoleInterval(Interval):
++    """One run or fixed interval of the hole, every number from geometry.log_hole."""
++
++    rqd_pct: float = Field(ge=0, le=100)
++    tcr_pct: float = Field(ge=0, le=100)
++    natural_fractures: int = Field(ge=0)
++    fracture_frequency_per_m: float = Field(ge=0)
++    uncertain_breaks: int = Field(ge=0)
++    rock_quality: RockQuality
++    boxes: list[int]  # boxes the core of this interval comes from
++    lithology: str | None = None  # of the reviewed run that covers most of it
++    anomalies: list[AnomalyType] = Field(default_factory=list)
++
++
++class HoleZone(Interval):
++    rqd_pct: float = Field(ge=0, le=100)
++    min_rqd_pct: float = Field(ge=0, le=100)
++    intervals: int = Field(ge=1)
++    rock_quality: RockQuality
++
++
++class HoleCore(Interval):
++    """One piece of core in the hole, at its depth, and where it lies in its box photo.
++
++    Placed as the hole log lays it (hole.core_pieces); the 3D view wraps this part of
++    the straightened tray around the cylinder. x and y are pixels of the tray image.
++    """
++
++    box_id: str
++    box_number: int = Field(ge=1)
++    row: int = Field(ge=0)
++    x0: float
++    x1: float
++    y0: float
++    y1: float
++    px_per_cm: float = Field(gt=0)  # of the tray: y1 - y0 over it is the core's width
++
++
++class HoleTrace(_Strict):
++    """Collar orientation for the 3D view. Without a survey it is an example and says so."""
++
++    azimuth_deg: float = Field(ge=0, lt=360)
++    dip_deg: float = Field(ge=-90, le=90)
++    surveyed: bool
++    note: str
++
++
++class HoleView(_Strict):
++    hole_id: str = Field(min_length=1)
++    step_m: float = Field(gt=0)
++    zone_max_rqd: float
++    from_m: float | None = None
++    to_m: float | None = None
++    boxes: list[HoleBox]
++    issues: list[HoleIssue] = Field(default_factory=list)
++    runs: list[HoleInterval] = Field(default_factory=list)
++    intervals: list[HoleInterval] = Field(default_factory=list)
++    zones: list[HoleZone] = Field(default_factory=list)
++    core: list[HoleCore] = Field(default_factory=list)  # recovered core, for the 3D
++    trace: HoleTrace
+diff --git a/tests/test_geometry.py b/tests/test_geometry.py
+index affca69..d0e84da 100644
+--- a/tests/test_geometry.py
++++ b/tests/test_geometry.py
+@@ -105 +105,13 @@ def test_invalid_rqd_raises(rqd):
+         rock_quality_class(rqd)
++
++
++def test_combined_rqd_weights_each_run_by_its_length():
++    from coresight.geometry import combined_rqd
++
++    # 1.5 m at 20 % and 0.5 m at 100 %: 0.3 + 0.5 m intact of 2 m
++    assert combined_rqd([(0.0, 1.5, 20.0), (1.5, 2.0, 100.0)]) == pytest.approx(40.0)
++    assert combined_rqd([(5.0, 6.0, 33.3)]) == pytest.approx(33.3)
++    with pytest.raises(ValueError):
++        combined_rqd([])
++    with pytest.raises(ValueError):
++        combined_rqd([(2.0, 1.0, 50.0)])
+diff --git a/tests/test_meta_client.py b/tests/test_meta_client.py
+index 1281263..1e64c45 100644
+--- a/tests/test_meta_client.py
++++ b/tests/test_meta_client.py
+@@ -1,2 +1,20 @@
+-from coresight.meta_client import parse_sam_text
++import json
++from pathlib import Path
++
++import httpx
++import pytest
++
++from coresight.meta_client import MetaClient, TransientAPIError, parse_sam_text, sam_masks
++
++# One real SAM 3.1 record (prompt "stone", Onkalo 1 at 2048 px wide), Oct 26.
++SAM_ONE_RECORD = Path(__file__).parent / "data" / "sam_one_record.txt"
++
++
++def test_sam_masks_decodes_real_record_at_its_bounds():
++    masks = sam_masks(SAM_ONE_RECORD.read_text(encoding="utf-8"))
++    assert len(masks) == 1
++    left, top, right, bottom = masks[0]["bounds"]
++    assert masks[0]["mask"].shape == (bottom - top, right - left)
++    assert 0.5 < masks[0]["mask"].mean() < 1.0
++    assert masks[0]["id"] == 0
+ 
+@@ -17,3 +35,195 @@ def test_parse_sam_text_reads_box_and_mask_per_record():
+ 
++def test_parse_sam_text_payload_with_separator_characters():
++    text = (
++        "<0f>0<|box;x1=1;y1=2;x2=3;y2=4;w=10;h=10|><|mask;x=0;y=0;data=2,2,~a|>b,c;d|>,"
++        "1<|box;x1=5;y1=6;x2=7;y2=8;w=10;h=10|><|mask;x=0;y=0;data=2,2,!z|>\n"
++    )
++    records = parse_sam_text(text)
++    assert [r["mask"] for r in records] == ["2,2,~a|>b,c;d", "2,2,!z"]
++
++
+ def test_parse_sam_text_no_matches():
+     assert parse_sam_text("") == []
++
++
++SSE_OK = (
++    'data: {"type": "response.output_text.delta", "delta": "0<|box;x1=1|>"}\n\n'
++    'data: {"type": "response.output_text.delta", "delta": "<|mask;data=2,2,~a|>"}\n\n'
++    "data: [DONE]\n\n"
++)
++
++
++def fake_client(tmp_path, statuses, waits=None):
++    """MetaClient whose HTTP answers come from ``statuses`` (an int status or an exception)."""
++    calls = []
++
++    def handler(request):
++        calls.append(request)
++        status = statuses[min(len(calls) - 1, len(statuses) - 1)]
++        if isinstance(status, Exception):
++            raise status
++        if status == 200:
++            return httpx.Response(200, text=SSE_OK)
++        return httpx.Response(status, text="error")
++
++    client = MetaClient(
++        api_key="test",
++        cache_dir=tmp_path,
++        backoff_s=1.0,
++        transport=httpx.MockTransport(handler),
++        sleep=(waits.append if waits is not None else lambda s: None),
++    )
++    return client, calls
++
++
++def test_sam_response_is_cached_by_image_and_prompt(tmp_path):
++    client, calls = fake_client(tmp_path, [200])
++    first = client.segment_row_raw(b"png-bytes", "stone")
++    again = client.segment_row_raw(b"png-bytes", "stone")
++    assert first == again == "0<|box;x1=1|><|mask;data=2,2,~a|>"
++    assert len(calls) == 1
++    client.segment_row_raw(b"png-bytes", "rock")
++    client.segment_row_raw(b"other-bytes", "stone")
++    assert len(calls) == 3
++    assert len(list((tmp_path / "sam").glob("*.txt"))) == 3
++
++
++def test_transient_errors_are_retried_with_backoff(tmp_path):
++    waits = []
++    client, calls = fake_client(
++        tmp_path, [429, httpx.ConnectTimeout("slow"), 503, 200], waits=waits
++    )
++    assert client.segment_row_raw(b"png", "stone").startswith("0<|box")
++    assert len(calls) == 4
++    assert waits == [1.0, 2.0, 4.0]
++
++
++def test_client_errors_are_not_retried(tmp_path):
++    client, calls = fake_client(tmp_path, [400])
++    with pytest.raises(RuntimeError, match="SAM 400"):
++        client.segment_row_raw(b"png", "stone")
++    assert len(calls) == 1
++    assert not (tmp_path / "sam").exists()
++
++
++def test_retries_give_up_after_max_retries(tmp_path):
++    client, calls = fake_client(tmp_path, [500])
++    with pytest.raises(TransientAPIError):
++        client.segment_row_raw(b"png", "stone")
++    assert len(calls) == client.max_retries + 1
++
++
++def test_transcribe_sends_documented_multipart_and_validates_answer(tmp_path):
++    seen = {}
++
++    def handler(request: httpx.Request) -> httpx.Response:
++        seen["path"] = request.url.path
++        seen["accept"] = request.headers["accept"]
++        seen["body"] = request.read()
++        return httpx.Response(
++            200,
++            json={"sessionId": "s1", "transcript": "pirita diseminada", "audioDurationMs": 1800,
++                  "turns": []},
++        )  # fmt: skip
++
++    client = MetaClient(api_key="k", cache_dir=tmp_path, transport=httpx.MockTransport(handler))
++    t = client.transcribe(b"RIFF....WAVE", keywords=["pyrite"])
++    assert t.transcript == "pirita diseminada" and t.audioDurationMs == 1800
++    assert seen["path"] == "/v1/asr/transcribe"
++    assert seen["accept"] == "application/json"
++    body = seen["body"]
++    assert b'name="request"' in body and b'"model": "muse-voice-transcribe-1.0"' in body
++    assert b'"audioEncoding": "WAV"' in body and b'"mode": "PUSH_TO_TALK"' in body
++    assert b'name="audio"; filename="dictation.wav"' in body and b"audio/wav" in body
++
++
++def test_transcribe_retries_a_rate_limit(tmp_path):
++    answers = [httpx.Response(429, text="busy"),
++               httpx.Response(200, json={"sessionId": "s", "transcript": "ok",
++                                         "audioDurationMs": 1, "turns": []})]  # fmt: skip
++    client = MetaClient(
++        api_key="k", cache_dir=tmp_path, sleep=lambda s: None,
++        transport=httpx.MockTransport(lambda r: answers.pop(0)),
++    )  # fmt: skip
++    assert client.transcribe(b"RIFF").transcript == "ok"
++
++
++def test_respond_posts_the_body_and_caches_the_answer(tmp_path):
++    calls = []
++
++    def handler(request):
++        calls.append(json.loads(request.content))
++        return httpx.Response(200, json={"output": [{"type": "function_call", "name": "x"}]})
++
++    client = MetaClient(api_key="k", cache_dir=tmp_path, transport=httpx.MockTransport(handler))
++    body = {"model": "muse-wonder-1.0", "input": [], "tools": []}
++    assert client.respond(body)["output"][0]["name"] == "x"
++    assert client.respond(dict(body))["output"][0]["name"] == "x"
++    assert calls == [body]  # the second answer came from data/cache/responses
++
++
++def test_locate_row_asks_for_grounding_with_a_schema_and_caches_it(tmp_path):
++    calls = []
++    answer = {"objects": [{"kind": "core", "x_min": 12, "y_min": 80, "x_max": 240, "y_max": 920},
++                          {"kind": "run_block", "x_min": 241, "y_min": 60, "x_max": 270,
++                           "y_max": 1003}]}  # fmt: skip
++
++    def handler(request):
++        calls.append(json.loads(request.content))
++        text = json.dumps(answer)
++        return httpx.Response(
++            200, json={"output": [{"content": [{"type": "output_text", "text": text}]}]}
++        )
++
++    client = MetaClient(api_key="k", cache_dir=tmp_path, transport=httpx.MockTransport(handler))
++    first = client.locate_row(b"png")
++    again = client.locate_row(b"png")
++    assert len(calls) == 1 and first == again
++    assert [o.kind for o in first.objects] == ["core", "run_block"]
++    body = calls[0]
++    assert body["model"] == "muse-spark-1.3"
++    assert body["text"]["format"]["name"] == "RowLocation"
++    assert "0 to 1000 grid" in body["input"][0]["content"][0]["text"]
++
++
++# The credit watch (point G): every request that reached the API, and every cache hit
++
++
++def test_every_request_and_cache_hit_is_logged_without_prompts(tmp_path):
++    from coresight.meta_client import usage_summary
++
++    def handler(request):
++        usage = {"input_tokens": 120, "output_tokens": 30}
++        return httpx.Response(200, json={"output": [], "usage": usage})
++
++    client = MetaClient(api_key="k", cache_dir=tmp_path, transport=httpx.MockTransport(handler))
++    body = {"model": "muse-wonder-1.0", "input": "secret prompt"}
++    client.respond(body)
++    client.respond(body)  # same request: from the cache
++    entries = client.usage.entries()
++    assert [e.get("cached", False) for e in entries] == [False, True]
++    assert entries[0]["status"] == 200 and entries[0]["input_tokens"] == 120
++    assert "secret" not in (tmp_path / "usage.jsonl").read_text()
++    wonder = usage_summary(entries)["hour"]["muse-wonder-1.0"]
++    assert (wonder["calls"], wonder["cached"], wonder["output_tokens"]) == (1, 1, 30)
++
++
++def test_rate_limits_and_old_calls_are_counted_apart():
++    from coresight.meta_client import usage_summary
++
++    now = 1_000_000.0
++    entries = [
++        {"at": now - 10, "model": "sam-3.1", "status": 429, "seconds": 0.2},
++        {"at": now - 20, "model": "sam-3.1", "status": 200, "seconds": 3.0},
++        {"at": now - 7200, "model": "sam-3.1", "status": 200, "seconds": 2.0},
++    ]
++    s = usage_summary(entries, now)
++    assert s["hour"]["sam-3.1"]["calls"] == 2 and s["hour"]["sam-3.1"]["rate_limited"] == 1
++    assert s["day"]["sam-3.1"]["calls"] == 3 and s["all"]["sam-3.1"]["seconds"] == 5.2
++
++
++def test_without_a_cache_dir_nothing_is_logged():
++    client = MetaClient(api_key="k", cache_dir=None, transport=httpx.MockTransport(
++        lambda r: httpx.Response(200, json={"usage": {}})))  # fmt: skip
++    client.respond({"model": "m"})
++    assert client.usage is None

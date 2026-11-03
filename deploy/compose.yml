@@ -1,0 +1,25 @@
+# On the VPS: /opt/coresight/compose.yml. The key lives only in /etc/coresight.env.
+services:
+  coresight:
+    image: coresight:${IMAGE_TAG:?set IMAGE_TAG}
+    restart: unless-stopped
+    env_file:
+      - path: /etc/coresight.env
+      - path: /etc/coresight-ops.env  # CORESIGHT_OPS_TOKEN: the credit watch at /ops
+        required: false
+    environment:
+      CORESIGHT_MAX_ANALYSES_PER_HOUR: "20"
+      CORESIGHT_MAX_DICTATIONS_PER_HOUR: "120"
+      CORESIGHT_MAX_SAM_POINTS_PER_HOUR: "200"
+      # the tour's agents: Nevada box 1 with the geologist's corrections (two cards removed)
+      CORESIGHT_TOUR_AGENTS_BOX: "00aaf0cd3771"
+    ports:
+      - "127.0.0.1:8610:8000"  # Docker skips ufw: never publish on 0.0.0.0
+    volumes:
+      - coresight-data:/app/data/reviews
+      - coresight-cache:/app/data/cache
+    labels:
+      vps.keep: "true"
+volumes:
+  coresight-data:
+  coresight-cache:
