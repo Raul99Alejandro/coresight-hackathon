@@ -27,32 +27,6 @@ index 9db7a79..71509b2 100644
 +
 +# Internal notes: plan, analyses, video script
 +internal/
-diff --git a/CLAUDE.md b/CLAUDE.md
-index e2a16f6..fa1aec9 100644
---- a/CLAUDE.md
-+++ b/CLAUDE.md
-@@ -9,3 +9,3 @@ Proyecto de AnaliZac para el Meta Global AI Developer Hackathon.
- - Juzgado: 4 al 8 nov. Final en vivo y ganadores: lun 9 nov.
--- Plan día por día: `docs/PLAN.md`. Lo prometido en la aplicación: `docs/APPLICATION.md`.
-+- Plan día por día: `internal/PLAN.md` (fuera de git). Lo prometido en la aplicación: `docs/APPLICATION.md`.
- - Comando `/day`: dice qué toca hoy y propone tareas.
-@@ -14,5 +14,2 @@ Entrada: foto de una caja. Salida: registro geotécnico y geológico por interva
- 
--## Restricción
--Nada relacionado con Freight Technologies: ni código, ni datos, ni el dominio de logística o aduanas.
--
- ## Arquitectura (neurosimbólica)
-@@ -25,6 +22,7 @@ Nada relacionado con Freight Technologies: ni código, ni datos, ni el dominio d
- | 4 | describe: litología, alteración, mineralización, anomalías | `pipeline.describe` + `meta_client` | Muse Spark, salida validada con Pydantic |
--| 5 | handoffs: borrador de solicitud de ensayes y alerta de terreno | `pipeline.draft_handoffs` | Agente, solo con aprobación humana |
--| 6 | api + UI de revisión, correcciones guardadas, export CSV | por crear (día 7) | FastAPI |
-+| 5 | api + UI de revisión, correcciones escritas o dictadas, export CSV | por crear (día 7) | FastAPI, Muse Voice Transcribe |
-+| 6 | agentes de área: orquestador y borradores para laboratorio, seguridad/geotecnia, planta y finanzas | `pipeline.draft_handoffs` (día 8) | Muse Wonder orquesta, Muse Spark con herramientas; solo con aprobación humana |
- 
--Visión a futuro (no es compromiso del hackathon): capa de agentes que conecte operaciones, laboratorio, seguridad, administración y finanzas de una mina.
-+La etapa 4 también corre con Muse Glimmer en infraestructura propia (modo sin internet), con el mismo contrato de salida.
-+Visión a futuro (no es compromiso del hackathon): sumar mantenimiento, operaciones y administración a la misma capa de agentes.
- 
 diff --git a/data/labels/README.md b/data/labels/README.md
 index 3e4df46..7e8660f 100644
 --- a/data/labels/README.md

@@ -5,9 +5,9 @@ Built by AnaliZac, an AI consultancy in Zacatecas, Mexico's leading silver-produ
 
 **[Try the live demo](https://coresight.analizac.com)**: open it and take the 60-second tour. No sign-up.
 
-**[Watch the video (3 min)](https://www.youtube.com/watch?v=Og-IVdhk4vs)**
+**[Watch the video (3 min)](https://www.youtube.com/watch?v=BceyZbq7P9c)**
 
-This repo holds only work done during the hackathon. The code written before kickoff stays in its own public repo, [Raul99Alejandro/coresight](https://github.com/Raul99Alejandro/coresight), pinned at commit [`14bc545`](https://github.com/Raul99Alejandro/coresight/tree/14bc545a8f0190f6ffeb452378406bf86e2ca1ee). `install.py` fetches that commit and applies our changes. [What existed before and what was built during the hackathon](#built-before-the-hackathon).
+The code in this repo is only work done during the hackathon. The code written before kickoff stays in its own public repo, [Raul99Alejandro/coresight](https://github.com/Raul99Alejandro/coresight), pinned at commit [`14bc545`](https://github.com/Raul99Alejandro/coresight/tree/14bc545a8f0190f6ffeb452378406bf86e2ca1ee). `install.py` fetches that commit and applies our changes. Paths such as `src/coresight/geometry.py` exist in `workspace/` after install, or in the [full tree](https://github.com/Raul99Alejandro/coresight/tree/main). [What existed before and what was built during the hackathon](#built-before-the-hackathon).
 
 ![SAM 3.1 masks on a public core tray from Nevada: each piece of core is cut on its own. A card the log still counts as core is for the geologist to remove](docs/img/masks.jpg)
 
@@ -43,6 +43,7 @@ cd workspace
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
+python scripts/fetch_public_images.py   # public sample photos, into data/raw/
 cp .env.example .env             # add your Meta Model API key
 pytest
 uvicorn coresight.api:app        # review page at http://127.0.0.1:8000
@@ -100,7 +101,7 @@ How this compares with people: we found no study that gives, in RQD points, how 
 We do not claim CoreSight is within human variability. The error is why a geologist reviews every value before it is used.
 
 What the numbers rest on:
-- 34 runs from the [Mining Core Sampling Dataset](https://www.kaggle.com/datasets/imoore/mining-core-sampling-dataset) (Kaggle, CC BY-NC-SA 4.0). The reference is the RQD and recovery the mine geologist wrote on each box lid. These photos and reference values are not in the repo or the demo (non-commercial license); only our errors are published, and the Bland-Altman plot of these runs stays private because its x axis would reveal the reference.
+- 34 runs from the [Mining Core Sampling Dataset](https://www.kaggle.com/datasets/imoore/mining-core-sampling-dataset) (Kaggle, CC BY-NC-SA 4.0). The reference is the RQD and recovery the mine geologist wrote on each box lid. These photos are not in the repo or the demo (non-commercial license). The values we read from the lids are in `data/labels/I*.json`, under the same license and with attribution; they are not used in the demo. The Bland-Altman plot of these runs is not published.
 - Onkalo (Commons, CC BY-SA 4.0) and Nevada U12G (U.S. DOE, public domain), labelled by us.
 - The `+marks` variant reads marks the geologist already made, so it is not the headline.
 
@@ -150,7 +151,7 @@ That repo's `main` also keeps the full tree with every dated hackathon commit, s
 ### How this repo uses it
 
 - New files from the hackathon are here, at their normal paths.
-- Changes to the files that existed before kickoff are in `patches/changes-to-pre-event-files.patch`: 15 files changed. `docs/PLAN.md` was removed. `README.md` was rewritten and is here.
+- Changes to the files that existed before kickoff are in `patches/changes-to-pre-event-files.patch`: 14 files changed. `docs/PLAN.md` was removed. `README.md` was rewritten and is here. `CLAUDE.md`, our notes for the coding agent, is not carried over.
 - `install.py` fetches `14bc545`, applies the patch, removes what was removed and adds the new files in `workspace/`. CI does the same on every push and runs the tests there.
 
 ## Built during the hackathon

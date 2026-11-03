@@ -2,7 +2,7 @@
 
 URL: https://coresight.analizac.com (VPS compartido de AnaliZac).
 
-Reglas del VPS (`centro-de-mando/vault/analizac/_empresa/despliegue.md`):
+Reglas del VPS:
 - Es una caja compartida: `nginx -t` y `reload`, nunca `restart`.
 - Docker se salta ufw: el contenedor publica solo en `127.0.0.1:8610`.
 - En el VPS docker requiere `sudo` (el usuario de `analizac-vps` no está en el grupo docker).
@@ -15,7 +15,7 @@ La imagen solo lleva fotos públicas (Onkalo, Commons, CC BY-SA 4.0; Nevada U12G
 1. DNS: registro A `coresight` -> IP del VPS en hPanel (analizac.com no tiene wildcard).
 2. En el VPS, Raúl crea `/etc/coresight.env` con `META_API_KEY=...` y `chmod 600`.
 3. `/opt/coresight/compose.yml` = `deploy/compose.yml`.
-4. Cookie del visitante (puntos 1 y 2 del tercer análisis): en `/etc/coresight.env` agregar `CORESIGHT_SESSION_SECRET=` con 64 caracteres al azar (`openssl rand -hex 32`). Firma la cookie `cs_visitor` que dice de quién es cada caja. Si falta, el servidor genera uno al arrancar y cada reinicio solo olvida de quién eran las cajas subidas.
+4. Cookie del visitante (sesión de cada visitante): en `/etc/coresight.env` agregar `CORESIGHT_SESSION_SECRET=` con 64 caracteres al azar (`openssl rand -hex 32`). Firma la cookie `cs_visitor` que dice de quién es cada caja. Si falta, el servidor genera uno al arrancar y cada reinicio solo olvida de quién eran las cajas subidas.
 5. Vigilancia de créditos (punto G): `/etc/coresight-ops.env` con `CORESIGHT_OPS_TOKEN=...` (modo 600). Sin ese archivo `/ops` y `/api/ops/usage` responden 404.
 6. nginx: `deploy/nginx-coresight.conf` en `sites-available`, enlace en `sites-enabled`, `nginx -t`, `systemctl reload nginx`, luego `certbot --nginx -d coresight.analizac.com`.
 

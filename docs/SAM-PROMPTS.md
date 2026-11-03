@@ -1,6 +1,6 @@
 # Prompts de caja y de punto de SAM 3.1 (smoke test, 27 oct)
 
-Preparación de los puntos B (Spark localiza, SAM corta) y C (SAM con clic) del segundo análisis.
+Preparación de los puntos B (Spark localiza, SAM corta) y C (SAM con clic).
 Fuente: https://dev.meta.ai/docs/sam/segmenting, sección "Prompt with boxes and points", leída el 27 oct.
 Script: `scripts/smoke_sam_prompts.py`, que pasa por `meta_client.segment_row_raw` (la misma llamada y la misma caché de siempre).
 Evidencia: `docs/sam-prompts/sam_prompts.json` y las dos imágenes de esta carpeta.

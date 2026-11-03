@@ -10,6 +10,7 @@ import pathlib
 import shutil
 import stat
 import subprocess
+import sys
 
 BASE_REPO = "https://github.com/Raul99Alejandro/coresight.git"
 BASE_COMMIT = "14bc545a8f0190f6ffeb452378406bf86e2ca1ee"
@@ -33,6 +34,8 @@ def writable(func, path, _exc) -> None:
 
 def main() -> None:
     if WORK.exists():
+        if "--force" not in sys.argv:
+            sys.exit("workspace/ already exists. Run with --force to rebuild it; that deletes its .env and .venv.")
         shutil.rmtree(WORK, onerror=writable)
     WORK.mkdir()
     git("init", "-q")
