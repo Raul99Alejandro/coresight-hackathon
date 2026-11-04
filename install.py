@@ -17,8 +17,8 @@ BASE_COMMIT = "14bc545a8f0190f6ffeb452378406bf86e2ca1ee"
 ROOT = pathlib.Path(__file__).resolve().parent
 WORK = ROOT / "workspace"
 PATCH = ROOT / "patches" / "changes-to-pre-event-files.patch"
-# Removed during the hackathon.
-DELETED = ["docs/PLAN.md"]
+# Removed during the hackathon, and notes for the coding agent that the product does not use.
+DELETED = ["docs/PLAN.md", "CLAUDE.md"]
 # Files that describe this repo, not the product.
 NOT_COPIED = {".git", ".github", ".gitattributes", ".gitignore", ".venv", ".env", "install.py", "patches", "workspace"}
 
